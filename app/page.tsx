@@ -26,6 +26,7 @@ type GalleryMedia = {
   duration?: number;
   special: boolean;
   createdAt: number;
+  temporary?: boolean;
 };
 
 type StoredGalleryMedia = Omit<GalleryMedia, "kind" | "mimeType" | "src"> & {
@@ -40,10 +41,6 @@ type DeleteIntent =
 const DB_NAME = "lap-gallery";
 const STORE_NAME = "images";
 const COUNT_OPTIONS = [24, 42, 72, 108];
-const MAX_IMAGE_SIZE_MB = 100;
-const MAX_VIDEO_SIZE_MB = 500;
-const MAX_IMAGE_SIZE = MAX_IMAGE_SIZE_MB * 1024 * 1024;
-const MAX_VIDEO_SIZE = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 const VIDEO_PREVIEW_DURATION_MS = 4_000;
 
 type RomanticParticleStyle = CSSProperties & {
@@ -568,6 +565,11 @@ export default function Home() {
     );
   }, [mediaItems, query]);
 
+  const temporaryCount = useMemo(
+    () => mediaItems.filter((media) => media.temporary).length,
+    [mediaItems],
+  );
+
   const feed = useMemo(() => {
     if (!filteredMedia.length) return [];
     return Array.from({ length: tileCount }, (_, index) => {
@@ -581,38 +583,56 @@ export default function Home() {
   }, [filteredMedia, tileCount]);
 
   const addFiles = async (files: File[]) => {
-    const validFiles = files.filter((file) =>
-      (isImageFile(file) && file.size <= MAX_IMAGE_SIZE)
-      || (isVideoFile(file) && file.size <= MAX_VIDEO_SIZE),
-    );
-    if (!validFiles.length) {
-      setNotice(`Chọn ảnh dưới ${MAX_IMAGE_SIZE_MB} MB hoặc video MP4, WebM, MOV dưới ${MAX_VIDEO_SIZE_MB} MB.`);
+    const supportedFiles = files.filter((file) => isImageFile(file) || isVideoFile(file));
+    if (!supportedFiles.length) {
+      setNotice("Không tìm thấy ảnh hoặc video có định dạng được hỗ trợ.");
       return;
     }
 
     setIsAdding(true);
     const added: GalleryMedia[] = [];
-    let failed = files.length - validFiles.length;
+    const unsupported = files.length - supportedFiles.length;
+    let unreadable = 0;
+    let temporary = 0;
 
-    for (const file of validFiles) {
+    try {
+      await navigator.storage?.persist?.();
+    } catch {
+      // The import can continue even when persistent storage is unavailable.
+    }
+
+    for (const file of supportedFiles) {
       let prepared: GalleryMedia | undefined;
       try {
         prepared = isVideoFile(file)
           ? await prepareVideo(file)
           : await prepareImage(file);
-        await saveMedia(prepared);
-        added.push(prepared);
       } catch {
-        if (prepared?.kind === "video") URL.revokeObjectURL(prepared.src);
-        failed += 1;
+        unreadable += 1;
+        continue;
       }
+
+      try {
+        await saveMedia(prepared);
+      } catch {
+        prepared = { ...prepared, temporary: true };
+        temporary += 1;
+      }
+      added.push(prepared);
     }
 
     setMediaItems((current) => [...current, ...added]);
     setManagerOpen(true);
     setIsAdding(false);
-    if (failed) {
-      setNotice(`Đã thêm ${added.length} mục, ${failed} tệp không đọc được hoặc quá dung lượng.`);
+
+    const details = [
+      temporary ? `${temporary} mục chỉ lưu trong phiên này vì bộ nhớ lâu dài đã đầy` : "",
+      unreadable ? `${unreadable} tệp không đọc được` : "",
+      unsupported ? `${unsupported} tệp không đúng định dạng` : "",
+    ].filter(Boolean);
+
+    if (details.length) {
+      setNotice(`Đã thêm ${added.length} mục. ${details.join(" • ")}.`);
     } else {
       setNotice(`Đã thêm ${added.length} mục vào bảng.`);
     }
@@ -877,6 +897,16 @@ export default function Home() {
               )}
             </div>
 
+            {temporaryCount > 0 && (
+              <div className="temporary-storage-note" role="status">
+                <span aria-hidden="true">♡</span>
+                <p>
+                  <strong>{temporaryCount} khoảnh khắc đang được giữ trong phiên này.</strong>
+                  Đừng tải lại hoặc đóng trang trước khi quay xong.
+                </p>
+              </div>
+            )}
+
             {!mediaItems.length ? (
               <button
                 className="drop-zone"
@@ -885,7 +915,7 @@ export default function Home() {
               >
                 <span className="upload-disc" aria-hidden="true">↑</span>
                 <strong>Thả một khoảnh khắc vào đây</strong>
-                <small>Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB • Video MP4, WebM, MOV tối đa {MAX_VIDEO_SIZE_MB} MB</small>
+                <small>Không giới hạn cứng theo từng tệp • Tệp lớn có thể được giữ trong phiên hiện tại</small>
               </button>
             ) : (
               <div className="source-list">
@@ -903,6 +933,7 @@ export default function Home() {
                         {media.kind === "video" ? `VIDEO • ${formatDuration(media.duration)} • ` : "ẢNH • "}
                         {media.width} × {media.height}
                       </span>
+                      {media.temporary && <span className="temporary-media-label">CHỈ TRONG PHIÊN NÀY</span>}
                     </div>
                     <button
                       className="special-toggle"

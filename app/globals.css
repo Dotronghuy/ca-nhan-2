@@ -412,6 +412,44 @@ button {
   font-weight: 400;
 }
 
+.temporary-storage-note {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -7px 0 20px;
+  padding: 12px 15px;
+  border: 1px solid rgb(205 120 146 / 0.28);
+  border-radius: 16px;
+  color: #744458;
+  background: rgb(255 236 242 / 0.72);
+}
+
+.temporary-storage-note > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #bd5275;
+  font-family: Georgia, serif;
+  font-size: 18px;
+}
+
+.temporary-storage-note p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.temporary-storage-note strong {
+  display: block;
+  color: #6b2742;
+}
+
 .drop-zone {
   display: flex;
   width: 100%;
@@ -510,6 +548,21 @@ button {
 .source-info span {
   color: var(--muted);
   font-size: 10px;
+}
+
+.source-info .temporary-media-label {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border: 1px solid rgb(185 68 105 / 0.22);
+  border-radius: 999px;
+  color: #a13055;
+  background: #fff0f4;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  line-height: 1.2;
 }
 
 .special-toggle {
