@@ -114,3 +114,18 @@ test("redesign ships responsive breakpoints, dark mode, and real empty-state med
   assert.doesNotMatch(styles, /gradient\(/);
   assert.doesNotMatch(`${source}\n${layout}`, /[—–]/);
 });
+
+test("hero tells a complete type, erase, love, and heart-fill story", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /const LOVE_MESSAGE = "ANH YÊU EM"/);
+  assert.match(source, /"typing-story"[\s\S]*?"deleting-story"[\s\S]*?"typing-love"/);
+  assert.match(source, /"filling-hearts"[\s\S]*?"holding-love"[\s\S]*?"deleting-love"/);
+  assert.match(source, /index < filledHearts/);
+  assert.match(styles, /\.love-heart\.is-filled \.love-heart-fill/);
+  assert.match(styles, /\.reduced-motion-headline[\s\S]*?display:\s*grid/);
+  assert.match(styles, /@keyframes love-settle/);
+});

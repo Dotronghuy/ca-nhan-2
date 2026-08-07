@@ -44,6 +44,18 @@ const COUNT_OPTIONS = [24, 42, 72, 108];
 const MAX_ACTIVE_VIDEO_PREVIEWS = 4;
 const VIDEO_PREVIEW_START_RATIO = 0.35;
 const VIDEO_PREVIEW_STOP_RATIO = 0.08;
+const STORY_LEAD = "Gom từng khoảnh khắc,";
+const STORY_ACCENT = "giữ cả chuyện chúng mình.";
+const LOVE_MESSAGE = "ANH YÊU EM";
+
+type HeadlinePhase =
+  | "typing-story"
+  | "holding-story"
+  | "deleting-story"
+  | "typing-love"
+  | "filling-hearts"
+  | "holding-love"
+  | "deleting-love";
 
 type RomanticParticleStyle = CSSProperties & {
   "--particle-size": string;
@@ -520,6 +532,113 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
   );
 }
 
+function AnimatedHeadline() {
+  const [phase, setPhase] = useState<HeadlinePhase>("typing-story");
+  const [characterCount, setCharacterCount] = useState(0);
+  const [filledHearts, setFilledHearts] = useState(0);
+  const storyLength = STORY_LEAD.length + STORY_ACCENT.length;
+  const showingStory = phase.endsWith("story");
+  const leadText = STORY_LEAD.slice(0, Math.min(characterCount, STORY_LEAD.length));
+  const accentText = STORY_ACCENT.slice(
+    0,
+    Math.max(0, characterCount - STORY_LEAD.length),
+  );
+  const loveText = LOVE_MESSAGE.slice(0, characterCount);
+
+  useEffect(() => {
+    let timeout: number;
+    const schedule = (callback: () => void, delay: number) => {
+      timeout = window.setTimeout(callback, delay);
+    };
+
+    if (phase === "typing-story") {
+      if (characterCount < storyLength) {
+        const isLineBreak = characterCount === STORY_LEAD.length;
+        const humanDelay = 44 + (characterCount % 4) * 7;
+        schedule(() => setCharacterCount((count) => count + 1), isLineBreak ? 240 : humanDelay);
+      } else {
+        schedule(() => setPhase("holding-story"), 1800);
+      }
+    } else if (phase === "holding-story") {
+      schedule(() => setPhase("deleting-story"), 1);
+    } else if (phase === "deleting-story") {
+      if (characterCount > 0) {
+        schedule(() => setCharacterCount((count) => count - 1), 24);
+      } else {
+        schedule(() => setPhase("typing-love"), 280);
+      }
+    } else if (phase === "typing-love") {
+      if (characterCount < LOVE_MESSAGE.length) {
+        schedule(() => setCharacterCount((count) => count + 1), 92);
+      } else {
+        schedule(() => setPhase("filling-hearts"), 420);
+      }
+    } else if (phase === "filling-hearts") {
+      if (filledHearts < 3) {
+        schedule(() => setFilledHearts((count) => count + 1), 560);
+      } else {
+        schedule(() => setPhase("holding-love"), 520);
+      }
+    } else if (phase === "holding-love") {
+      schedule(() => setPhase("deleting-love"), 2800);
+    } else if (characterCount > 0) {
+      schedule(() => setCharacterCount((count) => count - 1), 38);
+    } else {
+      schedule(() => {
+        setFilledHearts(0);
+        setPhase("typing-story");
+      }, 520);
+    }
+
+    return () => window.clearTimeout(timeout);
+  }, [characterCount, filledHearts, phase, storyLength]);
+
+  return (
+    <h1
+      id="page-title"
+      className={`kinetic-headline phase-${phase}`}
+      aria-label="Gom từng khoảnh khắc, giữ cả chuyện chúng mình. Anh yêu em."
+    >
+      <span className="animated-headline-copy" aria-hidden="true">
+        {showingStory ? (
+          <span className="headline-story">
+            <span className="headline-lead">
+              {leadText || "\u00A0"}
+              {characterCount <= STORY_LEAD.length && <span className="type-caret" />}
+            </span>
+            <em className="headline-accent">
+              {accentText || "\u00A0"}
+              {characterCount > STORY_LEAD.length && <span className="type-caret" />}
+            </em>
+          </span>
+        ) : (
+          <span className="headline-love">
+            <span className="love-message">
+              {loveText || "\u00A0"}
+              <span className="type-caret" />
+            </span>
+            <span className="love-hearts">
+              {[0, 1, 2].map((index) => (
+                <span
+                  className={`love-heart${index < filledHearts ? " is-filled" : ""}`}
+                  key={index}
+                >
+                  <span className="love-heart-outline">♡</span>
+                  <span className="love-heart-fill">♥</span>
+                </span>
+              ))}
+            </span>
+          </span>
+        )}
+      </span>
+      <span className="reduced-motion-headline" aria-hidden="true">
+        Gom từng khoảnh khắc,
+        <em>giữ cả chuyện chúng mình.</em>
+      </span>
+    </h1>
+  );
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -883,10 +1002,7 @@ export default function Home() {
         <section className="intro-row" aria-labelledby="page-title">
           <div className="intro-content">
             <p className="eyebrow"><span aria-hidden="true">♥</span> NHẬT KÝ ẢNH &amp; VIDEO CỦA HAI ĐỨA</p>
-            <h1 id="page-title">
-              Gom từng khoảnh khắc,<br />
-              <em>giữ cả chuyện chúng mình.</em>
-            </h1>
+            <AnimatedHeadline />
             <p className="intro-copy">
               Gom những tấm ảnh, đoạn video và nụ cười của hai đứa vào một thước phim dịu dàng. Đánh dấu <strong>Yêu thích</strong> để kỷ niệm ấy luôn nổi bật.
             </p>
