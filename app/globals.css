@@ -1109,6 +1109,7 @@ button {
 }
 
 .main-area {
+  z-index: 1;
   margin-left: 82px;
 }
 
@@ -1287,6 +1288,38 @@ button {
   color: #fff;
   background: linear-gradient(145deg, #ef819f, #cb4e73);
   box-shadow: 0 7px 16px rgb(202 77 114 / 0.2);
+}
+
+.count-control > .effect-toggle {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 8px;
+  border: 1px solid #edd0da;
+  border-radius: 11px;
+  color: #98506a;
+  background: #fff5f8;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.count-control > .effect-toggle:hover {
+  color: #fff;
+  background: #b13d63;
+}
+
+.effect-toggle span {
+  color: #df6588;
+  font-family: Georgia, serif;
+  font-size: 13px;
+}
+
+.effect-toggle:hover span {
+  color: #fff;
 }
 
 .library-panel {
@@ -1529,6 +1562,145 @@ button {
   box-shadow: 0 18px 45px rgb(74 18 42 / 0.28);
 }
 
+.love-cursor-glow,
+.romantic-rain,
+.cursor-love-trail {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.love-cursor-glow {
+  z-index: 0;
+  background: radial-gradient(
+    circle 165px at var(--love-x, 50%) var(--love-y, 34%),
+    rgb(247 137 169 / 0.2),
+    rgb(255 220 229 / 0.1) 40%,
+    transparent 72%
+  );
+  opacity: var(--love-glow, 0);
+  transition: opacity 260ms ease;
+}
+
+.romantic-rain {
+  z-index: 0;
+  contain: strict;
+}
+
+.falling-item {
+  position: absolute;
+  top: -15vh;
+  display: block;
+  width: var(--particle-size);
+  height: var(--particle-size);
+  animation-name: romantic-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.falling-heart {
+  color: rgb(211 75 115 / 0.62);
+  filter: drop-shadow(0 4px 5px rgb(128 31 66 / 0.12));
+  font-family: Georgia, serif;
+  font-size: calc(var(--particle-size) * 1.15);
+  line-height: 1;
+}
+
+.falling-petal {
+  border-radius: 80% 12% 72% 18%;
+  background: linear-gradient(145deg, rgb(255 190 207 / 0.82), rgb(198 66 105 / 0.7));
+  box-shadow: inset 2px 1px 3px rgb(255 255 255 / 0.38), 0 5px 8px rgb(117 34 63 / 0.09);
+  transform-origin: 70% 70%;
+}
+
+.falling-petal::after {
+  position: absolute;
+  inset: 18% 48% 12% 46%;
+  border-radius: 999px;
+  background: rgb(144 43 75 / 0.25);
+  content: "";
+  transform: rotate(34deg);
+}
+
+.falling-sparkle {
+  color: rgb(195 107 132 / 0.48);
+  font-size: calc(var(--particle-size) * 1.05);
+  line-height: 1;
+  text-shadow: 0 0 12px rgb(255 171 195 / 0.7);
+}
+
+.cursor-love-trail {
+  z-index: 70;
+  overflow: visible;
+}
+
+.cursor-heart {
+  position: absolute;
+  color: var(--trail-color);
+  font-family: Georgia, serif;
+  font-size: 14px;
+  line-height: 1;
+  text-shadow: 0 5px 10px rgb(119 34 65 / 0.2);
+  transform: translate(-50%, -50%) scale(0.2);
+  animation: cursor-heart-bloom 880ms cubic-bezier(0.17, 0.78, 0.28, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.cursor-heart.is-burst {
+  font-size: 17px;
+  animation-duration: 1.05s;
+}
+
+@keyframes romantic-fall {
+  0% {
+    transform: translate3d(0, -15vh, 0) rotate(0deg) scale(0.75);
+    opacity: 0;
+  }
+
+  9% {
+    opacity: 0.72;
+  }
+
+  48% {
+    transform: translate3d(var(--particle-sway), 52vh, 0) rotate(170deg) scale(1);
+    opacity: 0.62;
+  }
+
+  92% {
+    opacity: 0.5;
+  }
+
+  100% {
+    transform: translate3d(0, 116vh, 0) rotate(var(--particle-spin)) scale(0.82);
+    opacity: 0;
+  }
+}
+
+@keyframes cursor-heart-bloom {
+  0% {
+    transform: translate(-50%, -50%) scale(0.18) rotate(0deg);
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 0.96;
+  }
+
+  100% {
+    transform:
+      translate(
+        calc(-50% + var(--trail-x)),
+        calc(-50% + var(--trail-y))
+      )
+      scale(1.22)
+      rotate(var(--trail-rotate));
+    opacity: 0;
+  }
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -1661,6 +1833,10 @@ button {
     font-size: 6rem;
   }
 
+  .falling-item {
+    opacity: 0.42;
+  }
+
   .masonry-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 9px;
@@ -1730,7 +1906,20 @@ button {
   }
 }
 
+@media (hover: none) {
+  .love-cursor-glow,
+  .cursor-love-trail {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .love-cursor-glow,
+  .romantic-rain,
+  .cursor-love-trail {
+    display: none;
+  }
+
   *,
   *::before,
   *::after {

@@ -50,3 +50,19 @@ test("video previews play briefly when scrolled into view", async () => {
   assert.match(source, /video\.play\(\)/);
   assert.match(source, /video\.pause\(\)/);
 });
+
+test("romantic background effects are interactive and motion-safe", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /function RomanticEffects/);
+  assert.match(source, /ROMANTIC_PARTICLES/);
+  assert.match(styles, /\.falling-heart/);
+  assert.match(styles, /\.falling-petal/);
+  assert.match(source, /pointermove/);
+  assert.match(source, /cursor-heart/);
+  assert.match(source, /prefers-reduced-motion: reduce/);
+  assert.match(source, /lap-gallery-effects/);
+});

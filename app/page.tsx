@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CSSProperties,
   ChangeEvent,
   DragEvent,
   KeyboardEvent,
@@ -38,6 +39,22 @@ const COUNT_OPTIONS = [24, 42, 72, 108];
 const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 200 * 1024 * 1024;
 const VIDEO_PREVIEW_DURATION_MS = 4_000;
+
+type RomanticParticleStyle = CSSProperties & {
+  "--particle-size": string;
+  "--particle-sway": string;
+  "--particle-spin": string;
+};
+
+const ROMANTIC_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
+  kind: index % 7 === 0 ? "sparkle" : index % 2 === 0 ? "heart" : "petal",
+  left: (index * 37 + 9) % 100,
+  delay: -((index * 1.73) % 19),
+  duration: 11 + (index % 8) * 1.15,
+  size: 8 + (index % 5) * 3,
+  sway: (index % 2 === 0 ? 1 : -1) * (24 + (index % 4) * 14),
+  spin: (index % 2 === 0 ? 1 : -1) * (260 + (index % 5) * 75),
+}));
 
 let stopActiveVideoPreview: (() => void) | null = null;
 
@@ -311,6 +328,137 @@ function AutoPreviewVideo({ src }: { src: string }) {
   );
 }
 
+function RomanticEffects({ enabled }: { enabled: boolean }) {
+  const trailRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const trail = trailRef.current;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (!enabled || !trail || reduceMotion.matches) return;
+
+    const interactiveSelector = [
+      "button",
+      "a",
+      "input",
+      "video",
+      "img",
+      ".gallery-card",
+      ".library-panel",
+      ".top-bar",
+      ".side-nav",
+      ".lightbox",
+    ].join(",");
+    let lastEmission = 0;
+    let lastX = -100;
+    let lastY = -100;
+    let sequence = 0;
+    let glowTimeout: number | undefined;
+
+    const isBackground = (target: EventTarget | null) =>
+      target instanceof Element && !target.closest(interactiveSelector);
+
+    const setGlow = (x: number, y: number) => {
+      document.documentElement.style.setProperty("--love-x", `${x}px`);
+      document.documentElement.style.setProperty("--love-y", `${y}px`);
+      document.documentElement.style.setProperty("--love-glow", "1");
+      if (glowTimeout !== undefined) window.clearTimeout(glowTimeout);
+      glowTimeout = window.setTimeout(() => {
+        document.documentElement.style.setProperty("--love-glow", "0");
+      }, 260);
+    };
+
+    const emitHearts = (x: number, y: number, amount: number, burst = false) => {
+      for (let index = 0; index < amount; index += 1) {
+        const heart = document.createElement("span");
+        const spread = burst ? 34 + (index % 3) * 15 : 22;
+        const angle = burst
+          ? (Math.PI * 2 * index) / amount - Math.PI / 2
+          : -Math.PI / 2 + ((sequence % 5) - 2) * 0.16;
+        const driftX = Math.cos(angle) * spread;
+        const driftY = Math.sin(angle) * spread - (burst ? 18 : 28);
+
+        heart.className = `cursor-heart${burst ? " is-burst" : ""}`;
+        heart.textContent = sequence % 3 === 0 ? "♡" : "♥";
+        heart.style.left = `${x}px`;
+        heart.style.top = `${y}px`;
+        heart.style.setProperty("--trail-x", `${driftX}px`);
+        heart.style.setProperty("--trail-y", `${driftY}px`);
+        heart.style.setProperty("--trail-rotate", `${(sequence % 2 ? 1 : -1) * (18 + index * 7)}deg`);
+        heart.style.setProperty("--trail-color", sequence % 4 === 0 ? "#8f294b" : "#e96f91");
+        heart.addEventListener("animationend", () => heart.remove(), { once: true });
+        trail.appendChild(heart);
+        sequence += 1;
+      }
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerType === "touch" || !isBackground(event.target)) {
+        document.documentElement.style.setProperty("--love-glow", "0");
+        return;
+      }
+
+      setGlow(event.clientX, event.clientY);
+      const now = performance.now();
+      const distance = Math.hypot(event.clientX - lastX, event.clientY - lastY);
+      if (now - lastEmission < 82 || distance < 10) return;
+      lastEmission = now;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      emitHearts(event.clientX, event.clientY, 1);
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "touch" || !isBackground(event.target)) return;
+      setGlow(event.clientX, event.clientY);
+      emitHearts(event.clientX, event.clientY, 8, true);
+    };
+
+    document.addEventListener("pointermove", onPointerMove, { passive: true });
+    document.addEventListener("pointerdown", onPointerDown, { passive: true });
+
+    return () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerdown", onPointerDown);
+      if (glowTimeout !== undefined) window.clearTimeout(glowTimeout);
+      document.documentElement.style.removeProperty("--love-x");
+      document.documentElement.style.removeProperty("--love-y");
+      document.documentElement.style.removeProperty("--love-glow");
+      trail.replaceChildren();
+    };
+  }, [enabled]);
+
+  if (!enabled) return null;
+
+  return (
+    <>
+      <div className="love-cursor-glow" aria-hidden="true" />
+      <div className="romantic-rain" aria-hidden="true">
+        {ROMANTIC_PARTICLES.map((particle, index) => {
+          const style: RomanticParticleStyle = {
+            left: `${particle.left}%`,
+            animationDelay: `${particle.delay}s`,
+            animationDuration: `${particle.duration}s`,
+            "--particle-size": `${particle.size}px`,
+            "--particle-sway": `${particle.sway}px`,
+            "--particle-spin": `${particle.spin}deg`,
+          };
+
+          return (
+            <span
+              className={`falling-item falling-${particle.kind}`}
+              key={`${particle.kind}-${index}`}
+              style={style}
+            >
+              {particle.kind === "heart" ? "♥" : particle.kind === "sparkle" ? "✦" : ""}
+            </span>
+          );
+        })}
+      </div>
+      <div ref={trailRef} className="cursor-love-trail" aria-hidden="true" />
+    </>
+  );
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRef = useRef<GalleryMedia[]>([]);
@@ -321,6 +469,7 @@ export default function Home() {
   const [managerOpen, setManagerOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [tileCount, setTileCount] = useState(42);
+  const [effectsEnabled, setEffectsEnabled] = useState(true);
   const [preview, setPreview] = useState<GalleryMedia | null>(null);
   const [notice, setNotice] = useState("");
 
@@ -328,6 +477,9 @@ export default function Home() {
     let disposed = false;
     const storedCount = Number(localStorage.getItem("lap-gallery-count"));
     if (COUNT_OPTIONS.includes(storedCount)) setTileCount(storedCount);
+    if (localStorage.getItem("lap-gallery-effects") === "off") {
+      setEffectsEnabled(false);
+    }
 
     readMedia()
       .then((items) => {
@@ -482,6 +634,13 @@ export default function Home() {
     localStorage.setItem("lap-gallery-count", String(count));
   };
 
+  const toggleEffects = () => {
+    const nextEnabled = !effectsEnabled;
+    setEffectsEnabled(nextEnabled);
+    localStorage.setItem("lap-gallery-effects", nextEnabled ? "on" : "off");
+    setNotice(nextEnabled ? "Hiệu ứng tình yêu đã bật ♥" : "Đã tạm dừng hiệu ứng nền.");
+  };
+
   const openCard = (media: GalleryMedia) => {
     stopActiveVideoPreview?.();
     setPreview(media);
@@ -505,6 +664,7 @@ export default function Home() {
         <span className="floating-heart heart-one">♡</span>
         <span className="floating-heart heart-two">♡</span>
       </div>
+      <RomanticEffects enabled={effectsEnabled} />
       <input
         ref={fileInputRef}
         className="visually-hidden"
@@ -631,6 +791,15 @@ export default function Home() {
                 </button>
               ))}
             </div>
+            <button
+              className="effect-toggle"
+              type="button"
+              onClick={toggleEffects}
+              aria-pressed={effectsEnabled}
+            >
+              <span aria-hidden="true">{effectsEnabled ? "♥" : "♡"}</span>
+              {effectsEnabled ? "Hiệu ứng đang bật" : "Bật hiệu ứng"}
+            </button>
           </div>
         </section>
 
