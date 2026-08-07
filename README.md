@@ -21,7 +21,7 @@ Sau đó mở <http://localhost:3000/>.
 3. Chọn 24, 42, 72 hoặc 108 ô. Nội dung gốc sẽ tự lặp đến đủ số ô.
 4. Dùng ô tìm kiếm để lọc theo tên ảnh hoặc video.
 
-Khi một thẻ video hiện ít nhất 65% trên màn hình, trang sẽ tự phát bản xem trước không tiếng trong 4 giây. Mỗi lần chỉ có một video xem trước được phát; cuộn khỏi thẻ sẽ dừng và tua về đầu.
+Khi một thẻ video hiện khoảng 35% trên màn hình, trang sẽ tự phát bản xem trước không tiếng. Tối đa bốn video rõ nhất được phát cùng lúc và tiếp tục lặp khi còn trong vùng nhìn thấy; video chỉ dừng và tua về đầu khi đã cuộn gần ra khỏi màn hình. Mở một video trong trình xem sẽ tạm dừng các bản xem trước phía sau.
 
 Nền trang có tim, cánh hoa hồng và ánh lấp lánh rơi nhẹ. Khi rê chuột trên vùng nền, một quầng sáng cùng các trái tim nhỏ sẽ bung theo con trỏ; nhấn chuột tạo một chùm tim. Có thể bật hoặc tắt toàn bộ hiệu ứng bằng nút **Hiệu ứng** cạnh phần chọn nhịp lặp. Trang tự tắt chuyển động nếu thiết bị đang bật chế độ giảm chuyển động.
 

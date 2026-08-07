@@ -57,18 +57,22 @@ test("large media falls back to the current session and delete confirmation is c
   assert.doesNotMatch(source, /window\.(?:alert|confirm)\s*\(/);
 });
 
-test("video previews play briefly when scrolled into view", async () => {
+test("up to four visible video previews play until scrolled past", async () => {
   const source = await readFile(
     new URL("../app/page.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /VIDEO_PREVIEW_DURATION_MS = 4_000/);
-  assert.match(source, /intersectionRatio >= 0\.65/);
-  assert.match(source, /let stopActiveVideoPreview/);
-  assert.match(source, /stopActiveVideoPreview\?\.\(\)/);
+  assert.match(source, /MAX_ACTIVE_VIDEO_PREVIEWS = 4/);
+  assert.match(source, /VIDEO_PREVIEW_START_RATIO = 0\.35/);
+  assert.match(source, /VIDEO_PREVIEW_STOP_RATIO = 0\.08/);
+  assert.match(source, /videoPreviewRegistry/);
+  assert.match(source, /slice\(0, MAX_ACTIVE_VIDEO_PREVIEWS\)/);
+  assert.match(source, /registration\.ratio <= VIDEO_PREVIEW_STOP_RATIO/);
+  assert.doesNotMatch(source, /VIDEO_PREVIEW_DURATION_MS|previewTimeout/);
   assert.match(source, /video\.play\(\)/);
   assert.match(source, /video\.pause\(\)/);
+  assert.match(source, /muted\s+loop\s+playsInline/);
 });
 
 test("romantic background effects are interactive and motion-safe", async () => {

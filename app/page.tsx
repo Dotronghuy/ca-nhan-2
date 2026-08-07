@@ -41,7 +41,9 @@ type DeleteIntent =
 const DB_NAME = "lap-gallery";
 const STORE_NAME = "images";
 const COUNT_OPTIONS = [24, 42, 72, 108];
-const VIDEO_PREVIEW_DURATION_MS = 4_000;
+const MAX_ACTIVE_VIDEO_PREVIEWS = 4;
+const VIDEO_PREVIEW_START_RATIO = 0.35;
+const VIDEO_PREVIEW_STOP_RATIO = 0.08;
 
 type RomanticParticleStyle = CSSProperties & {
   "--particle-size": string;
@@ -59,7 +61,37 @@ const ROMANTIC_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
   spin: (index % 2 === 0 ? 1 : -1) * (260 + (index % 5) * 75),
 }));
 
-let stopActiveVideoPreview: (() => void) | null = null;
+type VideoPreviewRegistration = {
+  active: boolean;
+  eligible: boolean;
+  ratio: number;
+  start: () => void;
+  stop: () => void;
+};
+
+const videoPreviewRegistry = new Set<VideoPreviewRegistration>();
+let videoPreviewsSuspended = false;
+
+function syncVideoPreviews() {
+  const selected = new Set(
+    videoPreviewsSuspended
+      ? []
+      : [...videoPreviewRegistry]
+        .filter((preview) => preview.eligible)
+        .sort((left, right) => right.ratio - left.ratio)
+        .slice(0, MAX_ACTIVE_VIDEO_PREVIEWS),
+  );
+
+  videoPreviewRegistry.forEach((preview) => {
+    if (selected.has(preview)) preview.start();
+    else preview.stop();
+  });
+}
+
+function setVideoPreviewsSuspended(suspended: boolean) {
+  videoPreviewsSuspended = suspended;
+  syncVideoPreviews();
+}
 
 function isImageFile(file: File) {
   return file.type.startsWith("image/") || /\.(avif|gif|jpe?g|png|webp)$/i.test(file.name);
@@ -268,65 +300,70 @@ function AutoPreviewVideo({ src }: { src: string }) {
       return;
     }
 
-    let previewTimeout: number | undefined;
-    let playRequested = false;
+    let mounted = true;
+    let registration: VideoPreviewRegistration;
 
     const stopPreview = () => {
-      playRequested = false;
-      if (previewTimeout !== undefined) {
-        window.clearTimeout(previewTimeout);
-        previewTimeout = undefined;
-      }
+      if (!registration.active && video.paused) return;
+      registration.active = false;
       video.pause();
       if (video.readyState > 0) video.currentTime = 0;
-      setIsPlaying(false);
-      if (stopActiveVideoPreview === stopPreview) {
-        stopActiveVideoPreview = null;
-      }
+      if (mounted) setIsPlaying(false);
     };
 
     const startPreview = () => {
-      if (stopActiveVideoPreview === stopPreview) return;
-
-      stopActiveVideoPreview?.();
-      stopActiveVideoPreview = stopPreview;
-      playRequested = true;
-      if (video.readyState > 0) video.currentTime = 0;
+      if (registration.active || videoPreviewsSuspended) return;
+      registration.active = true;
       video.muted = true;
 
       void video.play()
         .then(() => {
-          if (!playRequested || stopActiveVideoPreview !== stopPreview) {
+          if (!mounted || !registration.active) {
             video.pause();
             return;
           }
           setIsPlaying(true);
-          previewTimeout = window.setTimeout(
-            stopPreview,
-            VIDEO_PREVIEW_DURATION_MS,
-          );
         })
-        .catch(stopPreview);
+        .catch(() => {
+          registration.active = false;
+          registration.eligible = false;
+          if (mounted) setIsPlaying(false);
+          syncVideoPreviews();
+        });
     };
+
+    registration = {
+      active: false,
+      eligible: false,
+      ratio: 0,
+      start: startPreview,
+      stop: stopPreview,
+    };
+    videoPreviewRegistry.add(registration);
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.65) {
-          startPreview();
-        } else if (stopActiveVideoPreview === stopPreview) {
-          stopPreview();
+        registration.ratio = entry.isIntersecting ? entry.intersectionRatio : 0;
+        if (registration.ratio >= VIDEO_PREVIEW_START_RATIO) {
+          registration.eligible = true;
+        } else if (!entry.isIntersecting || registration.ratio <= VIDEO_PREVIEW_STOP_RATIO) {
+          registration.eligible = false;
         }
+        syncVideoPreviews();
       },
-      { threshold: [0, 0.65, 1], rootMargin: "0px 0px -8% 0px" },
+      { threshold: [0, 0.08, 0.2, 0.35, 0.5, 0.75, 1] },
     );
 
-    video.addEventListener("ended", stopPreview);
     observer.observe(video);
 
     return () => {
+      mounted = false;
       observer.disconnect();
-      video.removeEventListener("ended", stopPreview);
-      if (stopActiveVideoPreview === stopPreview) stopPreview();
+      videoPreviewRegistry.delete(registration);
+      registration.active = false;
+      video.pause();
+      if (video.readyState > 0) video.currentTime = 0;
+      syncVideoPreviews();
     };
   }, [src]);
 
@@ -336,6 +373,7 @@ function AutoPreviewVideo({ src }: { src: string }) {
         ref={videoRef}
         src={src}
         muted
+        loop
         playsInline
         preload="metadata"
         aria-hidden="true"
@@ -528,6 +566,10 @@ export default function Home() {
     mediaRef.current = mediaItems;
   }, [mediaItems]);
 
+  useEffect(() => {
+    setVideoPreviewsSuspended(Boolean(preview));
+  }, [preview]);
+
   useEffect(() => () => {
     mediaRef.current.forEach((item) => {
       if (item.kind === "video") URL.revokeObjectURL(item.src);
@@ -687,7 +729,6 @@ export default function Home() {
       } else {
         const removedItems = [...mediaRef.current];
         await clearMedia();
-        stopActiveVideoPreview?.();
         setPreview(null);
         setMediaItems([]);
         removedItems.forEach((item) => {
@@ -716,7 +757,6 @@ export default function Home() {
   };
 
   const openCard = (media: GalleryMedia) => {
-    stopActiveVideoPreview?.();
     setPreview(media);
   };
 
