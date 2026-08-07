@@ -151,7 +151,8 @@ async function saveMedia(media: GalleryMedia): Promise<void> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
-    const { src: _src, ...storedMedia } = media;
+    const storedMedia: Partial<GalleryMedia> = { ...media };
+    delete storedMedia.src;
     transaction.objectStore(STORE_NAME).put(storedMedia);
     transaction.oncomplete = () => {
       database.close();
@@ -301,6 +302,8 @@ function AutoPreviewVideo({ src }: { src: string }) {
     }
 
     let mounted = true;
+    // Assigned after the callbacks are created because each callback closes over it.
+    // eslint-disable-next-line prefer-const
     let registration: VideoPreviewRegistration;
 
     const stopPreview = () => {
@@ -379,7 +382,7 @@ function AutoPreviewVideo({ src }: { src: string }) {
         aria-hidden="true"
       />
       <span className={`video-badge${isPlaying ? " is-playing" : ""}`}>
-        {isPlaying ? "● ĐANG PHÁT" : "▶ VIDEO"}
+        {isPlaying ? "ĐANG PHÁT" : "VIDEO"}
       </span>
     </>
   );
@@ -537,6 +540,8 @@ export default function Home() {
   useEffect(() => {
     let disposed = false;
     const storedCount = Number(localStorage.getItem("lap-gallery-count"));
+    // These preferences originate outside React and are synchronized once on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (COUNT_OPTIONS.includes(storedCount)) setTileCount(storedCount);
     if (localStorage.getItem("lap-gallery-effects") === "off") {
       setEffectsEnabled(false);
@@ -886,12 +891,15 @@ export default function Home() {
               Gom những tấm ảnh, đoạn video và nụ cười của hai đứa vào một thước phim dịu dàng. Đánh dấu <strong>Yêu thích</strong> để kỷ niệm ấy luôn nổi bật.
             </p>
             <div className="love-note">
-              <span aria-hidden="true">∞</span>
-              <p>Mỗi lần cuộn là một lần mình gặp lại nhau.</p>
+              <span aria-hidden="true">♡</span>
+              <p><strong>Riêng tư theo mặc định.</strong> Ảnh và video chỉ được lưu trên trình duyệt này.</p>
             </div>
           </div>
           <div className="count-control" aria-label="Số ô hiển thị">
-            <span>Nhịp lặp</span>
+            <div className="control-heading">
+              <span>Nhịp lặp</span>
+              <strong>{tileCount} khung</strong>
+            </div>
             <div>
               {COUNT_OPTIONS.map((count) => (
                 <button
@@ -905,6 +913,7 @@ export default function Home() {
                 </button>
               ))}
             </div>
+            <p>Chọn độ dài cho thước phim khi bạn cuộn xuống.</p>
             <button
               className="effect-toggle"
               type="button"
@@ -1011,21 +1020,20 @@ export default function Home() {
           </section>
         ) : mediaItems.length === 0 ? (
           <section className="empty-showcase" aria-label="Giới thiệu cách hoạt động">
-            <div className="empty-grid" aria-hidden="true">
-              {Array.from({ length: 9 }, (_, index) => (
-                <span className={`demo-tile demo-${index + 1}`} key={index} />
-              ))}
+            <div className="empty-visual" aria-hidden="true">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/og-v2.png" alt="" />
+              <span>GALLERY CỦA HAI ĐỨA</span>
             </div>
             <div className="empty-copy">
-              <span className="step-number">♥</span>
-              <p className="handwritten">made for your favorite person</p>
-              <h2>Một chiếc trend nhỏ.<br /><em>Một tình yêu thật to.</em></h2>
+              <p className="empty-kicker">BẮT ĐẦU TỪ MỘT KHOẢNH KHẮC</p>
+              <h2>Một chiếc trend nhỏ.<br /><em>Một câu chuyện rất riêng.</em></h2>
               <p>Chọn những khoảnh khắc của hai đứa, rồi cứ để chúng tự kể thành một câu chuyện. Mọi thứ chỉ được lưu trên máy này.</p>
-              <div className="mini-steps">
-                <span><b>1</b> Thêm ảnh và video của hai đứa</span>
-                <span><b>2</b> Ghim khoảnh khắc yêu thích</span>
-                <span><b>3</b> Cuộn xuống và quay trend</span>
-              </div>
+              <ol className="mini-steps">
+                <li><b>01</b><span>Thêm ảnh và video của hai đứa</span></li>
+                <li><b>02</b><span>Ghim khoảnh khắc yêu thích</span></li>
+                <li><b>03</b><span>Cuộn xuống và quay trend</span></li>
+              </ol>
             </div>
           </section>
         ) : filteredMedia.length === 0 ? (
@@ -1038,7 +1046,7 @@ export default function Home() {
           <section id="gallery" className="gallery-section" aria-label="Bảng ảnh và video lặp">
             <div className="gallery-meta">
               <p>
-                <span className="live-dot" />
+                <span className="gallery-kicker">ĐANG LẶP</span>
                 {filteredMedia.length} kỷ niệm đang tạo thành {tileCount} khung hình
               </p>
               <p>{mediaItems.filter((media) => media.special).length} khoảnh khắc yêu thích</p>
@@ -1101,6 +1109,8 @@ export default function Home() {
           </button>
           <div className="lightbox-image-wrap">
             {preview.kind === "video" ? (
+              // User-provided clips do not have a separate caption track available.
+              // eslint-disable-next-line jsx-a11y/media-has-caption
               <video src={preview.src} controls autoPlay playsInline preload="metadata" aria-label={preview.name} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1126,6 +1136,7 @@ export default function Home() {
 
       {deleteIntent && (
         <div
+          role="presentation"
           className="delete-confirm-backdrop"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !isDeleting) setDeleteIntent(null);

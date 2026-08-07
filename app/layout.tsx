@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 
-const title = "Lặp — Chuyện chúng mình";
+const title = "Lặp | Chuyện chúng mình";
 const description = "Gom ảnh và video của hai đứa thành một thước phim dịu dàng để quay trend cùng người mình yêu.";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -15,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ? forwardedProtocol
     : host.startsWith("localhost") ? "http" : "https";
   const baseUrl = new URL(`${protocol}://${host}`);
-  const socialImage = new URL("/og.png", baseUrl).toString();
+  const socialImage = new URL("/og-v2.png", baseUrl).toString();
 
   return {
     metadataBase: baseUrl,

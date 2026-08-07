@@ -29,7 +29,7 @@ test("server-renders the romantic Lặp Gallery with image and video support", a
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Lặp — Chuyện chúng mình<\/title>/i);
+  assert.match(html, /<title>Lặp \| Chuyện chúng mình<\/title>/i);
   assert.match(html, /Gom từng khoảnh khắc/);
   assert.match(html, /Kỷ niệm/);
   assert.match(html, /Thêm khoảnh khắc/);
@@ -75,7 +75,7 @@ test("up to four visible video previews play until scrolled past", async () => {
   assert.match(source, /muted\s+loop\s+playsInline/);
 });
 
-test("romantic background effects are interactive and motion-safe", async () => {
+test("romantic background effects stay motion-safe and visually restrained", async () => {
   const [source, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -91,7 +91,26 @@ test("romantic background effects are interactive and motion-safe", async () => 
   assert.match(source, /lap-gallery-effects/);
   assert.match(source, /size: 11 \+ \(index % 5\) \* 4/);
   assert.match(source, /burst \? 42 \+ \(index % 3\) \* 18 : 28/);
-  assert.match(styles, /circle 210px/);
-  assert.match(styles, /font-size: 18px/);
-  assert.match(styles, /font-size: 23px/);
+  assert.match(styles, /\.love-cursor-glow[\s\S]*?display:\s*none/);
+  assert.match(styles, /\.cursor-love-trail[\s\S]*?display:\s*none/);
+  assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+});
+
+test("redesign ships responsive breakpoints, dark mode, and real empty-state media", async () => {
+  const [source, styles, layout] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(styles, /prefers-color-scheme:\s*dark/);
+  assert.match(styles, /@media \(max-width:\s*960px\)/);
+  assert.match(styles, /@media \(max-width:\s*760px\)/);
+  assert.match(styles, /@media \(max-width:\s*480px\)/);
+  assert.match(styles, /\.masonry-grid[\s\S]*?repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(source, /<img src="\/og-v2\.png" alt="" \/>/);
+  assert.match(layout, /new URL\("\/og-v2\.png"/);
+  assert.doesNotMatch(source, /demo-tile|empty-grid/);
+  assert.doesNotMatch(styles, /gradient\(/);
+  assert.doesNotMatch(`${source}\n${layout}`, /[—–]/);
 });
