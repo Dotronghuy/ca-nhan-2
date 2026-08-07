@@ -33,11 +33,17 @@ type StoredGalleryMedia = Omit<GalleryMedia, "kind" | "mimeType" | "src"> & {
   mimeType?: string;
 };
 
+type DeleteIntent =
+  | { kind: "single"; media: GalleryMedia }
+  | { kind: "all" };
+
 const DB_NAME = "lap-gallery";
 const STORE_NAME = "images";
 const COUNT_OPTIONS = [24, 42, 72, 108];
-const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 200 * 1024 * 1024;
+const MAX_IMAGE_SIZE_MB = 100;
+const MAX_VIDEO_SIZE_MB = 500;
+const MAX_IMAGE_SIZE = MAX_IMAGE_SIZE_MB * 1024 * 1024;
+const MAX_VIDEO_SIZE = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 const VIDEO_PREVIEW_DURATION_MS = 4_000;
 
 type RomanticParticleStyle = CSSProperties & {
@@ -136,6 +142,22 @@ async function removeMedia(id: string): Promise<void> {
       resolve();
     };
     transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function clearMedia(): Promise<void> {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).clear();
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      database.close();
+      reject(transaction.error);
+    };
   });
 }
 
@@ -347,6 +369,7 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
       ".top-bar",
       ".side-nav",
       ".lightbox",
+      ".delete-confirm-backdrop",
     ].join(",");
     let lastEmission = 0;
     let lastX = -100;
@@ -461,6 +484,7 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
   const mediaRef = useRef<GalleryMedia[]>([]);
   const [mediaItems, setMediaItems] = useState<GalleryMedia[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -471,6 +495,8 @@ export default function Home() {
   const [tileCount, setTileCount] = useState(42);
   const [effectsEnabled, setEffectsEnabled] = useState(true);
   const [preview, setPreview] = useState<GalleryMedia | null>(null);
+  const [deleteIntent, setDeleteIntent] = useState<DeleteIntent | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -519,11 +545,20 @@ export default function Home() {
 
   useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setPreview(null);
+      if (event.key !== "Escape") return;
+      if (deleteIntent && !isDeleting) {
+        setDeleteIntent(null);
+        return;
+      }
+      setPreview(null);
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
+  }, [deleteIntent, isDeleting]);
+
+  useEffect(() => {
+    if (deleteIntent) deleteCancelButtonRef.current?.focus();
+  }, [deleteIntent]);
 
   const filteredMedia = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("vi");
@@ -551,7 +586,7 @@ export default function Home() {
       || (isVideoFile(file) && file.size <= MAX_VIDEO_SIZE),
     );
     if (!validFiles.length) {
-      setNotice("Chọn ảnh dưới 25 MB hoặc video MP4, WebM, MOV dưới 200 MB.");
+      setNotice(`Chọn ảnh dưới ${MAX_IMAGE_SIZE_MB} MB hoặc video MP4, WebM, MOV dưới ${MAX_VIDEO_SIZE_MB} MB.`);
       return;
     }
 
@@ -616,16 +651,35 @@ export default function Home() {
     }
   };
 
-  const deleteOne = async (media: GalleryMedia) => {
-    if (!window.confirm(`Xóa “${media.name}” khỏi thư viện?`)) return;
-    setPreview((current) => current?.id === media.id ? null : current);
-    setMediaItems((items) => items.filter((item) => item.id !== media.id));
-    if (media.kind === "video") URL.revokeObjectURL(media.src);
+  const confirmDeletion = async () => {
+    if (!deleteIntent || isDeleting) return;
+    const intent = deleteIntent;
+    setIsDeleting(true);
+
     try {
-      await removeMedia(media.id);
-      setNotice(`Đã xóa “${media.name}”.`);
+      if (intent.kind === "single") {
+        const { media } = intent;
+        await removeMedia(media.id);
+        setPreview((current) => current?.id === media.id ? null : current);
+        setMediaItems((items) => items.filter((item) => item.id !== media.id));
+        if (media.kind === "video") URL.revokeObjectURL(media.src);
+        setNotice(`Đã xóa “${media.name}”.`);
+      } else {
+        const removedItems = [...mediaRef.current];
+        await clearMedia();
+        stopActiveVideoPreview?.();
+        setPreview(null);
+        setMediaItems([]);
+        removedItems.forEach((item) => {
+          if (item.kind === "video") URL.revokeObjectURL(item.src);
+        });
+        setNotice(`Đã xóa toàn bộ ${removedItems.length} khoảnh khắc.`);
+      }
     } catch {
-      setNotice("Nội dung đã ẩn nhưng chưa thể xóa khỏi bộ nhớ trình duyệt.");
+      setNotice("Chưa thể xóa khỏi bộ nhớ trình duyệt. Các khoảnh khắc vẫn được giữ nguyên.");
+    } finally {
+      setIsDeleting(false);
+      setDeleteIntent(null);
     }
   };
 
@@ -811,9 +865,15 @@ export default function Home() {
                 <h2>{mediaItems.length ? `${mediaItems.length} khoảnh khắc của hai đứa` : "Đặt khoảnh khắc đầu tiên vào đây"}</h2>
               </div>
               {mediaItems.length > 0 && (
-                <button className="close-panel" type="button" onClick={() => setManagerOpen(false)}>
-                  Đóng <span aria-hidden="true">×</span>
-                </button>
+                <div className="panel-actions">
+                  <button className="delete-all-button" type="button" onClick={() => setDeleteIntent({ kind: "all" })}>
+                    <span aria-hidden="true">×</span>
+                    Xóa tất cả
+                  </button>
+                  <button className="close-panel" type="button" onClick={() => setManagerOpen(false)}>
+                    Đóng <span aria-hidden="true">×</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -825,7 +885,7 @@ export default function Home() {
               >
                 <span className="upload-disc" aria-hidden="true">↑</span>
                 <strong>Thả một khoảnh khắc vào đây</strong>
-                <small>Ảnh tối đa 25 MB • Video MP4, WebM, MOV tối đa 200 MB</small>
+                <small>Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB • Video MP4, WebM, MOV tối đa {MAX_VIDEO_SIZE_MB} MB</small>
               </button>
             ) : (
               <div className="source-list">
@@ -857,7 +917,7 @@ export default function Home() {
                     <button
                       className="delete-button"
                       type="button"
-                      onClick={() => void deleteOne(media)}
+                      onClick={() => setDeleteIntent({ kind: "single", media })}
                       aria-label={`Xóa ${media.name}`}
                     >
                       ×
@@ -990,6 +1050,57 @@ export default function Home() {
               {preview.special ? "Bỏ ghim" : "Ghim khoảnh khắc"}
             </button>
           </div>
+        </div>
+      )}
+
+      {deleteIntent && (
+        <div
+          className="delete-confirm-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isDeleting) setDeleteIntent(null);
+          }}
+        >
+          <section
+            className="delete-confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+            aria-describedby="delete-confirm-description"
+          >
+            <span className="delete-confirm-icon" aria-hidden="true">♡</span>
+            <p className="delete-confirm-eyebrow">XÁC NHẬN XÓA</p>
+            <h2 id="delete-confirm-title">
+              {deleteIntent.kind === "all"
+                ? `Xóa toàn bộ ${mediaItems.length} khoảnh khắc?`
+                : `Xóa “${deleteIntent.media.name}”?`}
+            </h2>
+            <p id="delete-confirm-description">
+              {deleteIntent.kind === "all"
+                ? "Tất cả ảnh và video lưu trên trình duyệt này sẽ bị xóa. Hành động này không thể hoàn tác."
+                : "Khoảnh khắc này sẽ bị xóa khỏi thư viện và bộ nhớ trên trình duyệt này."}
+            </p>
+            <div className="delete-confirm-actions">
+              <button
+                ref={deleteCancelButtonRef}
+                className="dialog-button dialog-button-secondary"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteIntent(null)}
+              >
+                Giữ lại
+              </button>
+              <button
+                className="dialog-button dialog-button-danger"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => void confirmDeletion()}
+              >
+                {isDeleting
+                  ? "Đang xóa…"
+                  : deleteIntent.kind === "all" ? "Xóa tất cả" : "Xóa khoảnh khắc"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
 

@@ -37,6 +37,24 @@ test("server-renders the romantic Lặp Gallery with image and video support", a
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
+test("large local media and custom delete confirmation are supported", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /MAX_IMAGE_SIZE_MB = 100/);
+  assert.match(source, /MAX_VIDEO_SIZE_MB = 500/);
+  assert.match(source, /Ảnh tối đa \{MAX_IMAGE_SIZE_MB\} MB/);
+  assert.match(source, /tối đa \{MAX_VIDEO_SIZE_MB\} MB/);
+  assert.match(source, /async function clearMedia/);
+  assert.match(source, /Xóa tất cả/);
+  assert.match(source, /role="alertdialog"/);
+  assert.match(source, /delete-confirm-backdrop/);
+  assert.match(styles, /\.delete-confirm-dialog/);
+  assert.doesNotMatch(source, /window\.(?:alert|confirm)\s*\(/);
+});
+
 test("video previews play briefly when scrolled into view", async () => {
   const source = await readFile(
     new URL("../app/page.tsx", import.meta.url),

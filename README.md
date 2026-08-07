@@ -25,7 +25,7 @@ Khi một thẻ video hiện ít nhất 65% trên màn hình, trang sẽ tự ph
 
 Nền trang có tim, cánh hoa hồng và ánh lấp lánh rơi nhẹ. Khi rê chuột trên vùng nền, một quầng sáng cùng các trái tim nhỏ sẽ bung theo con trỏ; nhấn chuột tạo một chùm tim. Có thể bật hoặc tắt toàn bộ hiệu ứng bằng nút **Hiệu ứng** cạnh phần chọn nhịp lặp. Trang tự tắt chuyển động nếu thiết bị đang bật chế độ giảm chuyển động.
 
-Ảnh được nén nhẹ; video được giữ ở dạng tệp gốc. Cả hai được lưu bằng IndexedDB trong chính trình duyệt đang dùng và không được gửi lên máy chủ. Ảnh tối đa 25 MB/tệp, video tối đa 200 MB/tệp.
+Ảnh được nén nhẹ; video được giữ ở dạng tệp gốc. Cả hai được lưu bằng IndexedDB trong chính trình duyệt đang dùng và không được gửi lên máy chủ. Ảnh tối đa 100 MB/tệp, video tối đa 500 MB/tệp. Thư viện có thể xóa từng mục hoặc xóa tất cả bằng hộp thoại xác nhận riêng.
 
 ## Kiểm tra bản dựng
 
