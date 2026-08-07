@@ -12,6 +12,7 @@
   --accent: #c94369;
   --accent-strong: #9d294d;
   --accent-soft: #f7dce3;
+  --heart-red: #e3273e;
   --danger: #a62e3d;
   --shadow-sm: 0 8px 28px rgba(64, 35, 44, 0.08);
   --shadow-lg: 0 30px 90px rgba(55, 27, 36, 0.2);
@@ -34,6 +35,7 @@
     --accent: #ec7899;
     --accent-strong: #ff9bb7;
     --accent-soft: #492632;
+    --heart-red: #ff4055;
     --danger: #ff8d99;
     --shadow-sm: 0 8px 28px rgba(0, 0, 0, 0.18);
     --shadow-lg: 0 30px 90px rgba(0, 0, 0, 0.42);
@@ -455,41 +457,58 @@ input:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 0.08em;
-  color: var(--accent-strong);
+  color: var(--heart-red);
 }
 
 .love-heart {
   position: relative;
   display: inline-grid;
-  width: 0.72em;
-  height: 1em;
+  width: 0.68em;
+  height: 0.92em;
   place-items: center;
-  font-size: 0.72em;
   line-height: 1;
+}
+
+.love-heart:nth-child(1) {
+  rotate: -7deg;
+  translate: 0 0.03em;
+}
+
+.love-heart:nth-child(2) {
+  translate: 0 -0.04em;
+}
+
+.love-heart:nth-child(3) {
+  rotate: 7deg;
+  translate: 0 0.03em;
 }
 
 .love-heart-outline,
 .love-heart-fill {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .love-heart-outline {
-  opacity: 0.62;
+  color: var(--heart-red);
+  opacity: 0.72;
+  transition: opacity 260ms ease;
 }
 
 .love-heart-fill {
+  color: var(--heart-red);
   opacity: 0;
-  transform: scale(0.16);
+  transform: scale(0.2);
   transition:
-    opacity 520ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 680ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 580ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .love-heart.is-filled .love-heart-outline {
-  opacity: 0;
+  opacity: 0.12;
 }
 
 .love-heart.is-filled .love-heart-fill {
@@ -497,8 +516,8 @@ input:focus-visible,
   transform: scale(1);
 }
 
-.phase-holding-love .love-hearts {
-  animation: love-settle 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+.love-heart.is-filled {
+  animation: heart-arrive 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .type-caret {
@@ -1466,10 +1485,10 @@ input:focus-visible,
   100% { opacity: 0; }
 }
 
-@keyframes love-settle {
-  0% { transform: scale(0.96); }
-  55% { transform: scale(1.06); }
-  100% { transform: scale(1); }
+@keyframes heart-arrive {
+  0% { scale: 0.72; }
+  58% { scale: 1.14; }
+  100% { scale: 1; }
 }
 
 @media (max-width: 1180px) {

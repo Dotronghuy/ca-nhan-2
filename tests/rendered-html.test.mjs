@@ -122,10 +122,15 @@ test("hero tells a complete type, erase, love, and heart-fill story", async () =
   ]);
 
   assert.match(source, /const LOVE_MESSAGE = "ANH YÊU EM"/);
+  assert.match(source, /LOVE_HEART_MILESTONES = \[3, 7, LOVE_MESSAGE\.length\]/);
   assert.match(source, /"typing-story"[\s\S]*?"deleting-story"[\s\S]*?"typing-love"/);
-  assert.match(source, /"filling-hearts"[\s\S]*?"holding-love"[\s\S]*?"deleting-love"/);
+  assert.match(source, /"typing-love"[\s\S]*?"holding-love"[\s\S]*?"deleting-love"/);
+  assert.doesNotMatch(source, /"filling-hearts"/);
   assert.match(source, /index < filledHearts/);
+  assert.match(source, /<Heart className="love-heart-outline" weight="regular"/);
+  assert.match(source, /<Heart className="love-heart-fill" weight="fill"/);
   assert.match(styles, /\.love-heart\.is-filled \.love-heart-fill/);
+  assert.match(styles, /--heart-red:\s*#e3273e/);
   assert.match(styles, /\.reduced-motion-headline[\s\S]*?display:\s*grid/);
-  assert.match(styles, /@keyframes love-settle/);
+  assert.match(styles, /@keyframes heart-arrive/);
 });

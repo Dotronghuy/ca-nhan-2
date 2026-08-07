@@ -1,5 +1,6 @@
 "use client";
 
+import { Heart } from "@phosphor-icons/react";
 import {
   type CSSProperties,
   ChangeEvent,
@@ -47,13 +48,13 @@ const VIDEO_PREVIEW_STOP_RATIO = 0.08;
 const STORY_LEAD = "Gom từng khoảnh khắc,";
 const STORY_ACCENT = "giữ cả chuyện chúng mình.";
 const LOVE_MESSAGE = "ANH YÊU EM";
+const LOVE_HEART_MILESTONES = [3, 7, LOVE_MESSAGE.length];
 
 type HeadlinePhase =
   | "typing-story"
   | "holding-story"
   | "deleting-story"
   | "typing-love"
-  | "filling-hearts"
   | "holding-love"
   | "deleting-love";
 
@@ -535,9 +536,11 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
 function AnimatedHeadline() {
   const [phase, setPhase] = useState<HeadlinePhase>("typing-story");
   const [characterCount, setCharacterCount] = useState(0);
-  const [filledHearts, setFilledHearts] = useState(0);
   const storyLength = STORY_LEAD.length + STORY_ACCENT.length;
   const showingStory = phase.endsWith("story");
+  const filledHearts = showingStory
+    ? 0
+    : LOVE_HEART_MILESTONES.filter((milestone) => characterCount >= milestone).length;
   const leadText = STORY_LEAD.slice(0, Math.min(characterCount, STORY_LEAD.length));
   const accentText = STORY_ACCENT.slice(
     0,
@@ -571,12 +574,6 @@ function AnimatedHeadline() {
       if (characterCount < LOVE_MESSAGE.length) {
         schedule(() => setCharacterCount((count) => count + 1), 92);
       } else {
-        schedule(() => setPhase("filling-hearts"), 420);
-      }
-    } else if (phase === "filling-hearts") {
-      if (filledHearts < 3) {
-        schedule(() => setFilledHearts((count) => count + 1), 560);
-      } else {
         schedule(() => setPhase("holding-love"), 520);
       }
     } else if (phase === "holding-love") {
@@ -585,13 +582,12 @@ function AnimatedHeadline() {
       schedule(() => setCharacterCount((count) => count - 1), 38);
     } else {
       schedule(() => {
-        setFilledHearts(0);
         setPhase("typing-story");
       }, 520);
     }
 
     return () => window.clearTimeout(timeout);
-  }, [characterCount, filledHearts, phase, storyLength]);
+  }, [characterCount, phase, storyLength]);
 
   return (
     <h1
@@ -623,8 +619,8 @@ function AnimatedHeadline() {
                   className={`love-heart${index < filledHearts ? " is-filled" : ""}`}
                   key={index}
                 >
-                  <span className="love-heart-outline">♡</span>
-                  <span className="love-heart-fill">♥</span>
+                  <Heart className="love-heart-outline" weight="regular" aria-hidden="true" />
+                  <Heart className="love-heart-fill" weight="fill" aria-hidden="true" />
                 </span>
               ))}
             </span>
