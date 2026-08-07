@@ -65,4 +65,9 @@ test("romantic background effects are interactive and motion-safe", async () => 
   assert.match(source, /cursor-heart/);
   assert.match(source, /prefers-reduced-motion: reduce/);
   assert.match(source, /lap-gallery-effects/);
+  assert.match(source, /size: 11 \+ \(index % 5\) \* 4/);
+  assert.match(source, /burst \? 42 \+ \(index % 3\) \* 18 : 28/);
+  assert.match(styles, /circle 210px/);
+  assert.match(styles, /font-size: 18px/);
+  assert.match(styles, /font-size: 23px/);
 });

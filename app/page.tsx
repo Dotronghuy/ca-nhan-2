@@ -51,7 +51,7 @@ const ROMANTIC_PARTICLES = Array.from({ length: 30 }, (_, index) => ({
   left: (index * 37 + 9) % 100,
   delay: -((index * 1.73) % 19),
   duration: 11 + (index % 8) * 1.15,
-  size: 8 + (index % 5) * 3,
+  size: 11 + (index % 5) * 4,
   sway: (index % 2 === 0 ? 1 : -1) * (24 + (index % 4) * 14),
   spin: (index % 2 === 0 ? 1 : -1) * (260 + (index % 5) * 75),
 }));
@@ -370,12 +370,12 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
     const emitHearts = (x: number, y: number, amount: number, burst = false) => {
       for (let index = 0; index < amount; index += 1) {
         const heart = document.createElement("span");
-        const spread = burst ? 34 + (index % 3) * 15 : 22;
+        const spread = burst ? 42 + (index % 3) * 18 : 28;
         const angle = burst
           ? (Math.PI * 2 * index) / amount - Math.PI / 2
           : -Math.PI / 2 + ((sequence % 5) - 2) * 0.16;
         const driftX = Math.cos(angle) * spread;
-        const driftY = Math.sin(angle) * spread - (burst ? 18 : 28);
+        const driftY = Math.sin(angle) * spread - (burst ? 24 : 34);
 
         heart.className = `cursor-heart${burst ? " is-burst" : ""}`;
         heart.textContent = sequence % 3 === 0 ? "♡" : "♥";
