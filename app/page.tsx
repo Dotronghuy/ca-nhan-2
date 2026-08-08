@@ -1049,34 +1049,19 @@ function PolaroidCard() {
             }}
           >
             <img src={photoSrc} alt="Kỷ niệm của chúng mình" />
-            <button
-              type="button"
-              className="polaroid-edit-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                polaroidInputRef.current?.click();
-              }}
-              title="Đổi ảnh kỷ niệm"
-              style={{
-                position: "absolute",
-                top: "6px",
-                right: "6px",
-                background: "rgba(0, 0, 0, 0.55)",
-                color: "#fff",
-                border: "none",
-                borderRadius: "50%",
-                width: "28px",
-                height: "28px",
-                fontSize: "14px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 10,
-              }}
-            >
-              📷
-            </button>
+            {!isFlipped && (
+              <button
+                type="button"
+                className="polaroid-edit-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  polaroidInputRef.current?.click();
+                }}
+                title="Đổi ảnh kỷ niệm"
+              >
+                📷
+              </button>
+            )}
           </div>
           <p
             className="polaroid-caption"
@@ -1186,6 +1171,21 @@ function VoiceoverWidget({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isFinishedRef = useRef(false);
 
+  // iOS Safari only allows one media element with audio at a time.
+  // We must fully pause BGM before playing voiceover, and call .play() to resume.
+  const pauseBgm = () => {
+    if (bgmRef.current && !bgmRef.current.paused) {
+      bgmRef.current.pause();
+    }
+  };
+
+  const resumeBgm = () => {
+    if (bgmRef.current) {
+      bgmRef.current.volume = 0.45;
+      bgmRef.current.play().catch(() => {});
+    }
+  };
+
   useEffect(() => {
     const saved = localStorage.getItem("lap-gallery-voiceover");
     if (saved) setVoiceSrc(saved);
@@ -1239,9 +1239,9 @@ function VoiceoverWidget({
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
-      if (bgmRef.current) bgmRef.current.volume = 0.45;
+      resumeBgm();
     } else {
-      if (bgmRef.current) bgmRef.current.volume = 0.04;
+      pauseBgm();
       
       if (isFinishedRef.current || audio.ended || audio.currentTime >= audio.duration * 0.95) {
         audio.currentTime = 0;
@@ -1256,6 +1256,7 @@ function VoiceoverWidget({
         .then(() => setIsPlaying(true))
         .catch((err) => {
           console.error("Voiceover play error:", err);
+          resumeBgm();
         });
     }
   };
@@ -1266,14 +1267,14 @@ function VoiceoverWidget({
     audio.volume = 1.0;
 
     const tryAutoPlay = () => {
-      if (bgmRef.current) bgmRef.current.volume = 0.04;
+      pauseBgm();
       isFinishedRef.current = false;
       audio
         .play()
         .then(() => setIsPlaying(true))
         .catch(() => {
           // Autoplay blocked by browser policy — user can click Play manually
-          if (bgmRef.current) bgmRef.current.volume = 0.45;
+          resumeBgm();
         });
     };
 
@@ -1298,7 +1299,7 @@ function VoiceoverWidget({
       isFinishedRef.current = true;
       audio.pause();
       setIsPlaying(false);
-      if (bgmRef.current) bgmRef.current.volume = 0.45;
+      resumeBgm();
       onProgress?.(1, false, true);
       return;
     }
@@ -1335,10 +1336,12 @@ function VoiceoverWidget({
           style={{ display: "none" }}
           onTimeUpdate={handleTimeUpdate}
           onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
+          onPause={() => {
+            setIsPlaying(false);
+          }}
           onEnded={() => {
             setIsPlaying(false);
-            if (bgmRef.current) bgmRef.current.volume = 0.45;
+            resumeBgm();
             onProgress?.(1, false, true);
           }}
         />
