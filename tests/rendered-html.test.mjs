@@ -33,7 +33,7 @@ test("server-renders the romantic Lặp Gallery with image and video support", a
   assert.match(html, /Gom từng khoảnh khắc/);
   assert.match(html, /Kỷ niệm/);
   assert.match(html, /Thêm khoảnh khắc/);
-  assert.match(html, /accept="image\/\*,video\/\*,\.mov,\.m4v"/i);
+  assert.match(html, /accept="image\/\*,video\/\*,\.heic,\.heif,image\/heic,image\/heif,\.mov,\.m4v"/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -75,6 +75,97 @@ test("up to four visible video previews play until scrolled past", async () => {
   assert.match(source, /muted\s+loop\s+playsInline/);
 });
 
+test("HEIC and HEIF images are accepted and converted before preview", async () => {
+  const [source, manifest] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(manifest, /"heic2any":/);
+  assert.match(source, /\\\.\(avif\|gif\|hei\[cf\]\|jpe\?g\|png\|webp\)/);
+  assert.match(source, /function isHeicFile/);
+  assert.match(source, /import\("heic2any"\)/);
+  assert.match(source, /toType:\s*"image\/jpeg"/);
+  assert.match(source, /createImageBitmap\(imageBlob\)/);
+  assert.match(source, /accept="image\/\*,video\/\*,\.heic,\.heif,image\/heic,image\/heif,\.mov,\.m4v"/);
+});
+
+test("uploads show per-file progress and process image/video queues in parallel", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /UPLOAD_IMAGE_CONCURRENCY = 6/);
+  assert.match(source, /UPLOAD_VIDEO_CONCURRENCY = 2/);
+  assert.match(source, /async function runLimitedQueue/);
+  assert.match(source, /fileName:\s*file\.name/);
+  assert.match(source, /fileSizeLabel:\s*formatFileSize\(file\.size\)/);
+  assert.match(source, /runLimitedQueue\(imageJobs,\s*UPLOAD_IMAGE_CONCURRENCY,\s*processUploadJob\)/);
+  assert.match(source, /runLimitedQueue\(videoJobs,\s*UPLOAD_VIDEO_CONCURRENCY,\s*processUploadJob\)/);
+  assert.match(source, /type UploadBatch/);
+  assert.match(source, /finishUploadTask\(task\.id\)/);
+  assert.match(source, /setUploadTasks\(\(tasks\) => tasks\.filter\(\(task\) => task\.id !== id\)\)/);
+  assert.match(source, /uploadActiveCount/);
+  assert.match(source, /uploadQueuedCount/);
+  assert.match(source, /xong mục nào ẩn mục đó/);
+  assert.match(source, /title=\{task\.fileName\}/);
+  assert.match(source, /\{task\.title\} • \{task\.fileSizeLabel\}/);
+  assert.match(styles, /\.upload-task-list[\s\S]*?max-height:\s*360px/);
+  assert.match(styles, /\.upload-task\.is-reading/);
+});
+
+test("gallery has right-click actions, shuffle, stable masonry columns, and a longer loop", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /const \[contextMenu, setContextMenu\]/);
+  assert.match(source, /const shuffleMedia = \(\) =>/);
+  assert.match(source, /<Shuffle weight="bold"/);
+  assert.match(source, /className="shuffle-button"/);
+  assert.match(source, /const openMediaMenu = \(/);
+  assert.match(source, /onContextMenu=\{\(event\) => openMediaMenu\(event, media\)\}/);
+  assert.match(source, /filteredMedia\.length \+ tileCount/);
+  assert.match(source, /repeatedFrameCount/);
+  assert.match(source, /function cardAspectRatioFor/);
+  assert.doesNotMatch(source, /gridRow:/);
+  assert.doesNotMatch(source, /gridColumn:/);
+  assert.match(styles, /\.masonry-grid[\s\S]*?column-count:\s*6/);
+  assert.match(styles, /@media \(max-width:\s*1180px\)[\s\S]*?\.masonry-grid[\s\S]*?column-count:\s*4/);
+  assert.match(styles, /@media \(max-width:\s*760px\)[\s\S]*?\.masonry-grid[\s\S]*?column-count:\s*2/);
+  assert.match(styles, /\.media-context-menu/);
+  assert.match(styles, /\.media-context-menu button\.danger/);
+});
+
+test("gallery keeps raw file names out of visible media chrome", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /numberedMediaTitle/);
+  assert.match(source, /mediaKindTitle/);
+  assert.match(source, /sourceTitle/);
+  assert.match(source, /<VideoCamera weight="duotone"/);
+  assert.match(source, /<ImageSquare weight="duotone"/);
+  assert.match(source, /className="favorite-ribbon"/);
+  assert.doesNotMatch(source, /<strong title=\{media\.name\}>\{media\.name\}<\/strong>/);
+  assert.doesNotMatch(source, /<strong>\{media\.name\}<\/strong>/);
+  assert.doesNotMatch(source, /<h2>\{preview\.name\}<\/h2>/);
+  assert.doesNotMatch(source, /alt=\{media\.name\}/);
+  assert.doesNotMatch(source, /alt=\{preview\.name\}/);
+  assert.doesNotMatch(source, /aria-label=\{preview\.name\}/);
+  assert.doesNotMatch(source, /updated\.name/);
+  assert.doesNotMatch(source, /deleteIntent\.media\.name/);
+  assert.doesNotMatch(source, /className="card-label"/);
+  assert.doesNotMatch(source, /className="card-shade"/);
+  assert.match(styles, /\.favorite-ribbon/);
+  assert.doesNotMatch(styles, /\.card-shade/);
+  assert.doesNotMatch(styles, /rgba\(25,\s*12,\s*17,\s*0\.58\)/);
+});
+
 test("romantic background effects stay motion-safe and visually restrained", async () => {
   const [source, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -107,7 +198,7 @@ test("redesign ships responsive breakpoints, dark mode, and real empty-state med
   assert.match(styles, /@media \(max-width:\s*960px\)/);
   assert.match(styles, /@media \(max-width:\s*760px\)/);
   assert.match(styles, /@media \(max-width:\s*480px\)/);
-  assert.match(styles, /\.masonry-grid[\s\S]*?repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.masonry-grid[\s\S]*?column-count:\s*2/);
   assert.match(source, /<img src="\/og-v2\.png" alt="" \/>/);
   assert.match(layout, /new URL\("\/og-v2\.png"/);
   assert.doesNotMatch(source, /demo-tile|empty-grid/);

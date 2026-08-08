@@ -1,8 +1,9 @@
 "use client";
 
-import { Heart } from "@phosphor-icons/react";
+import { Heart, ImageSquare, Shuffle, Star, Trash, VideoCamera } from "@phosphor-icons/react";
 import {
   type CSSProperties,
+  type MouseEvent,
   ChangeEvent,
   DragEvent,
   KeyboardEvent,
@@ -39,6 +40,39 @@ type DeleteIntent =
   | { kind: "single"; media: GalleryMedia }
   | { kind: "all" };
 
+type UploadTaskStatus =
+  | "queued"
+  | "reading"
+  | "converting"
+  | "optimizing"
+  | "saving"
+  | "complete"
+  | "temporary"
+  | "error";
+
+type UploadTask = {
+  id: string;
+  title: string;
+  fileName: string;
+  fileSizeLabel: string;
+  kind: MediaKind;
+  progress: number;
+  status: UploadTaskStatus;
+  detail: string;
+};
+
+type UploadBatch = {
+  total: number;
+  processed: number;
+  errors: number;
+};
+
+type MediaContextMenu = {
+  media: GalleryMedia;
+  x: number;
+  y: number;
+};
+
 const DB_NAME = "lap-gallery";
 const STORE_NAME = "images";
 const COUNT_OPTIONS = [24, 42, 72, 108];
@@ -49,6 +83,15 @@ const STORY_LEAD = "Gom từng khoảnh khắc,";
 const STORY_ACCENT = "giữ cả chuyện chúng mình.";
 const LOVE_MESSAGE = "ANH YÊU EM";
 const LOVE_HEART_MILESTONES = [3, 7, LOVE_MESSAGE.length];
+const UPLOAD_IMAGE_CONCURRENCY = 6;
+const UPLOAD_VIDEO_CONCURRENCY = 2;
+const UPLOAD_DONE_STATUSES = new Set<UploadTaskStatus>(["complete", "temporary", "error"]);
+const UPLOAD_ACTIVE_STATUSES = new Set<UploadTaskStatus>([
+  "reading",
+  "converting",
+  "optimizing",
+  "saving",
+]);
 
 type HeadlinePhase =
   | "typing-story"
@@ -107,11 +150,84 @@ function setVideoPreviewsSuspended(suspended: boolean) {
 }
 
 function isImageFile(file: File) {
-  return file.type.startsWith("image/") || /\.(avif|gif|jpe?g|png|webp)$/i.test(file.name);
+  return file.type.startsWith("image/") || /\.(avif|gif|hei[cf]|jpe?g|png|webp)$/i.test(file.name);
 }
 
 function isVideoFile(file: File) {
   return file.type.startsWith("video/") || /\.(m4v|mov|mp4|ogv|webm)$/i.test(file.name);
+}
+
+function isHeicFile(file: File) {
+  return /^image\/hei[cf]$/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+}
+
+function mediaKindForFile(file: File): MediaKind {
+  return isVideoFile(file) ? "video" : "image";
+}
+
+function uploadTaskTitle(file: File, index: number) {
+  const kind = mediaKindForFile(file) === "video" ? "Video" : "Ảnh";
+  return `${kind} đang nhập ${String(index + 1).padStart(2, "0")}`;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const digits = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function waitForPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
+async function runLimitedQueue<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+) {
+  let cursor = 0;
+  const runnerCount = Math.min(Math.max(1, concurrency), items.length);
+  const runners = Array.from({ length: runnerCount }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor];
+      cursor += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(runners);
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Không thể tối ưu ảnh này."));
+      }
+    }, type, quality);
+  });
+}
+
+function blobToDataUrl(blob: Blob, onProgress?: (progress: number) => void) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    };
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Không thể đọc ảnh này."));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function hydrateMedia(item: StoredGalleryMedia): GalleryMedia {
@@ -204,8 +320,26 @@ async function clearMedia(): Promise<void> {
   });
 }
 
-async function prepareImage(file: File): Promise<GalleryMedia> {
-  const bitmap = await createImageBitmap(file);
+async function prepareImage(
+  file: File,
+  onProgress: (progress: number, detail: string, status?: UploadTaskStatus) => void = () => {},
+): Promise<GalleryMedia> {
+  let imageBlob: Blob = file;
+  if (isHeicFile(file)) {
+    onProgress(18, "Đang chuyển HEIC", "converting");
+    await waitForPaint();
+    const { default: heic2any } = await import("heic2any");
+    const converted = await heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.92,
+    });
+    imageBlob = Array.isArray(converted) ? converted[0] : converted;
+  }
+
+  onProgress(36, "Đang đọc ảnh", "reading");
+  await waitForPaint();
+  const bitmap = await createImageBitmap(imageBlob);
   const maxSide = 1800;
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
@@ -219,7 +353,13 @@ async function prepareImage(file: File): Promise<GalleryMedia> {
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
-  const dataUrl = canvas.toDataURL("image/webp", 0.88);
+  onProgress(66, "Đang tối ưu ảnh", "optimizing");
+  await waitForPaint();
+  const optimizedBlob = await canvasToBlob(canvas, "image/webp", 0.88);
+  onProgress(78, "Đang chuẩn bị hiển thị", "optimizing");
+  const dataUrl = await blobToDataUrl(optimizedBlob, (ratio) => {
+    onProgress(78 + Math.round(ratio * 8), "Đang nạp ảnh vào bộ nhớ", "optimizing");
+  });
 
   return {
     id: `${Date.now()}-${crypto.randomUUID()}`,
@@ -235,10 +375,15 @@ async function prepareImage(file: File): Promise<GalleryMedia> {
   };
 }
 
-async function prepareVideo(file: File): Promise<GalleryMedia> {
+async function prepareVideo(
+  file: File,
+  onProgress: (progress: number, detail: string, status?: UploadTaskStatus) => void = () => {},
+): Promise<GalleryMedia> {
   const src = URL.createObjectURL(file);
 
   try {
+    onProgress(28, "Đang đọc video", "reading");
+    await waitForPaint();
     const metadata = await new Promise<{
       width: number;
       height: number;
@@ -268,6 +413,8 @@ async function prepareVideo(file: File): Promise<GalleryMedia> {
       video.src = src;
     });
 
+    onProgress(72, "Đang chuẩn bị video", "optimizing");
+    await waitForPaint();
     return {
       id: `${Date.now()}-${crypto.randomUUID()}`,
       name: file.name.replace(/\.[^/.]+$/, "") || "Video mới",
@@ -294,13 +441,37 @@ function formatDuration(duration = 0) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function rowSpanFor(media: GalleryMedia, occurrence: number) {
-  const ratio = media.height / media.width;
-  const variation = (occurrence % 3) - 1;
-  if (media.special) {
-    return Math.max(18, Math.min(27, Math.round(17 + ratio * 4 + variation)));
+function mediaKindTitle(media: GalleryMedia) {
+  return media.kind === "video" ? "Video kỷ niệm" : "Ảnh kỷ niệm";
+}
+
+function numberedMediaTitle(media: GalleryMedia, index: number) {
+  return `${mediaKindTitle(media)} ${String(index + 1).padStart(2, "0")}`;
+}
+
+function mediaDetails(media: GalleryMedia) {
+  const dimensions = `${media.width} × ${media.height}`;
+  if (media.kind === "video") {
+    return `${formatDuration(media.duration)} • ${dimensions}`;
   }
-  return Math.max(11, Math.min(23, Math.round(8 + ratio * 6 + variation)));
+  return dimensions;
+}
+
+function cardGridStyle(media: GalleryMedia, occurrence: number): CSSProperties {
+  const naturalRatio = media.width / Math.max(1, media.height);
+  const variation = 1 + ((occurrence % 3) - 1) * 0.04;
+  const ratio = Math.max(0.55, Math.min(1.7, naturalRatio * variation));
+
+  const colSpan = media.special ? 2 : 1;
+  const approxWidth = colSpan * 200 + (colSpan - 1) * 12;
+  const approxHeight = approxWidth / ratio;
+  const rowSpan = Math.max(6, Math.round((approxHeight + 12) / 22));
+
+  return {
+    gridColumn: `span ${colSpan}`,
+    gridRow: `span ${rowSpan}`,
+    aspectRatio: `${ratio}`,
+  };
 }
 
 function AutoPreviewVideo({ src }: { src: string }) {
@@ -413,12 +584,9 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
       "button",
       "a",
       "input",
+      "textarea",
+      "select",
       "video",
-      "img",
-      ".gallery-card",
-      ".library-panel",
-      ".top-bar",
-      ".side-nav",
       ".lightbox",
       ".delete-confirm-backdrop",
     ].join(",");
@@ -442,6 +610,10 @@ function RomanticEffects({ enabled }: { enabled: boolean }) {
     };
 
     const emitHearts = (x: number, y: number, amount: number, burst = false) => {
+      while (trail.childElementCount > 32) {
+        trail.firstElementChild?.remove();
+      }
+
       for (let index = 0; index < amount; index += 1) {
         const heart = document.createElement("span");
         const spread = burst ? 42 + (index % 3) * 18 : 28;
@@ -635,6 +807,713 @@ function AnimatedHeadline() {
   );
 }
 
+// ==========================================================================
+// ROMANTIC SOUND EFFECTS & MUSIC HELPERS
+// ==========================================================================
+
+function playWaxSealSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(240, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  } catch {}
+}
+
+function playPaperRustleSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const bufferSize = ctx.sampleRate * 0.3;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(1100, ctx.currentTime);
+    filter.Q.setValueAtTime(1.5, ctx.currentTime);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    noise.start();
+  } catch {}
+}
+
+function playTypingSound(charIndex: number) {
+  try {
+    if (charIndex % 3 !== 0) return;
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const notes = [523.25, 659.25, 783.99, 880.0, 1046.5];
+    const freq = notes[charIndex % notes.length];
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(0.035, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.08);
+  } catch {}
+}
+
+function playHeartBurstSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.06);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime + i * 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.06 + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.06);
+      osc.stop(ctx.currentTime + i * 0.06 + 0.25);
+    });
+  } catch {}
+}
+
+// ==========================================================================
+// FEATURE 1: HEART FIREWORKS BURST
+// ==========================================================================
+
+function HeartFireworks({ active }: { active: boolean }) {
+  const [particles, setParticles] = useState<
+    Array<{ id: number; dx: string; dy: string; rot: string; size: string; color: string; symbol: string }>
+  >([]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    playHeartBurstSound();
+
+    const symbols = ["♥", "✦", "🌸", "♥", "✨"];
+    const colors = ["#e64c72", "#f07d9e", "#ffd7e2", "#ff4055", "#e96f91"];
+
+    const newParticles = Array.from({ length: 32 }, (_, i) => {
+      const angle = (i / 32) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+      const distance = 120 + Math.random() * 180;
+      const dx = `${Math.cos(angle) * distance}px`;
+      const dy = `${Math.sin(angle) * distance}px`;
+      const rot = `${(Math.random() * 2 - 1) * 60}deg`;
+      const size = `${16 + Math.random() * 14}px`;
+      const color = colors[i % colors.length];
+      const symbol = symbols[i % symbols.length];
+
+      return { id: i, dx, dy, rot, size, color, symbol };
+    });
+
+    setParticles(newParticles);
+  }, [active]);
+
+  if (!active || !particles.length) return null;
+
+  return (
+    <div className="heart-fireworks-container" aria-hidden="true">
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="firework-particle"
+          style={
+            {
+              "--dx": p.dx,
+              "--dy": p.dy,
+              "--rot": p.rot,
+              "--p-size": p.size,
+              "--p-color": p.color,
+            } as CSSProperties
+          }
+        >
+          {p.symbol}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ==========================================================================
+// FEATURE 4: INTERACTIVE 3D FLIPPABLE POLAROID CARD
+// ==========================================================================
+
+function PolaroidCard() {
+  const [isFlipped, setIsFlipped] = useState(false);
+  const polaroidInputRef = useRef<HTMLInputElement>(null);
+  const [photoSrc, setPhotoSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const savedPhoto = localStorage.getItem("lap-gallery-polaroid-photo");
+    if (savedPhoto) {
+      setPhotoSrc(savedPhoto);
+    }
+  }, []);
+
+  const handlePhotoUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setPhotoSrc(dataUrl);
+      localStorage.setItem("lap-gallery-polaroid-photo", dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div
+      className={`polaroid-3d-card${isFlipped ? " is-flipped" : ""}`}
+      title={photoSrc ? "Nhấp để lật xem lời nhắn bí mật ♥" : "Nhấp để chọn ảnh kỷ niệm ♥"}
+    >
+      <input
+        ref={polaroidInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handlePhotoUpload}
+      />
+      <div className="polaroid-inner">
+        <div className="polaroid-front">
+          <div
+            className="polaroid-photo-frame"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!photoSrc) {
+                polaroidInputRef.current?.click();
+              } else {
+                setIsFlipped(true);
+              }
+            }}
+          >
+            {photoSrc ? (
+              <img src={photoSrc} alt="Kỷ niệm của chúng mình" />
+            ) : (
+              <div className="polaroid-photo-placeholder">
+                <span style={{ fontSize: "28px" }}>📷</span>
+                <span>Chọn ảnh kỷ niệm</span>
+              </div>
+            )}
+          </div>
+          <p className="polaroid-caption">{photoSrc ? "Góc kỷ niệm ♥" : "Thêm ảnh ♥"}</p>
+        </div>
+        <div
+          className="polaroid-back"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsFlipped(false);
+          }}
+        >
+          <p className="polaroid-back-text">
+            "Ngày đầu tiên bên em, anh biết em chính là mảnh ghép định mệnh của anh..."
+          </p>
+          <span className="polaroid-back-heart">♥</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// FEATURE 3: LOVE DAYS COUNTER HELPER & MODAL
+// ==========================================================================
+
+function calculateLoveDays(startDateStr: string): number {
+  try {
+    const start = new Date(startDateStr);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - start.getTime());
+    return Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+  } catch {
+    return 520;
+  }
+}
+
+function LoveDateModal({
+  currentDate,
+  onSave,
+  onClose,
+}: {
+  currentDate: string;
+  onSave: (date: string) => void;
+  onClose: () => void;
+}) {
+  const [dateVal, setDateVal] = useState(currentDate);
+
+  return (
+    <div className="love-days-dialog-backdrop" role="dialog" aria-modal="true">
+      <div className="love-days-dialog">
+        <h3>Ngày Kỷ Niệm Yêu Nhau ♥</h3>
+        <p>Chọn ngày hai đứa bắt đầu yêu nhau để đếm số ngày kỷ niệm:</p>
+        <input
+          type="date"
+          value={dateVal}
+          onChange={(e) => setDateVal(e.target.value)}
+        />
+        <div className="love-days-dialog-actions">
+          <button
+            className="dialog-button dialog-button-secondary"
+            type="button"
+            onClick={onClose}
+          >
+            Hủy
+          </button>
+          <button
+            className="dialog-button dialog-button-primary"
+            type="button"
+            onClick={() => {
+              onSave(dateVal);
+              onClose();
+            }}
+          >
+            Lưu kỷ niệm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// LOVE LETTER INTRO COMPONENT
+// ==========================================================================
+
+// ==========================================================================
+// FEATURE 5: VOICEOVER AUDIO PLAYER WIDGET
+// ==========================================================================
+
+function VoiceoverWidget({ bgmRef }: { bgmRef: React.RefObject<HTMLVideoElement | null> }) {
+  const [voiceSrc, setVoiceSrc] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lap-gallery-voiceover");
+    if (saved) setVoiceSrc(saved);
+  }, []);
+
+  const handleUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setVoiceSrc(dataUrl);
+      localStorage.setItem("lap-gallery-voiceover", dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current || !voiceSrc) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      if (bgmRef.current) bgmRef.current.volume = 0.45;
+    } else {
+      if (bgmRef.current) bgmRef.current.volume = 0.15;
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+    }
+  };
+
+  return (
+    <div className={`voiceover-widget${isPlaying ? " is-playing" : ""}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*"
+        style={{ display: "none" }}
+        onChange={handleUpload}
+      />
+      {voiceSrc && (
+        <audio
+          ref={audioRef}
+          src={voiceSrc}
+          onEnded={() => {
+            setIsPlaying(false);
+            if (bgmRef.current) bgmRef.current.volume = 0.45;
+          }}
+        />
+      )}
+      <div className="voiceover-header">
+        <span className="voiceover-title">
+          <span>🎙️</span>
+          <span>{voiceSrc ? "Lời đọc của anh" : "Giọng đọc truyền cảm"}</span>
+        </span>
+        <button
+          className="voiceover-upload-btn"
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {voiceSrc ? "Đổi ghi âm 🎙️" : "Tải lên ghi âm giọng đọc 🎙️"}
+        </button>
+      </div>
+
+      {voiceSrc ? (
+        <div className="voiceover-controls">
+          <button
+            className="voiceover-play-btn"
+            type="button"
+            onClick={togglePlay}
+            aria-label={isPlaying ? "Tạm dừng" : "Phát giọng đọc"}
+          >
+            {isPlaying ? "❚❚" : "▶"}
+          </button>
+          <div className="voiceover-waves" aria-hidden="true">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div key={i} className="voiceover-wave-bar" />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p style={{ margin: 0, fontSize: "13px", color: "#8c2545", opacity: 0.85 }}>
+          Nhấp vào "Tải lên ghi âm giọng đọc" để chọn file ghi âm lời thì thầm bằng giọng nói của bạn dành cho em ♥
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ==========================================================================
+// LOVE LETTER TEXT DEFINITIONS
+// ==========================================================================
+
+const LETTER_POEM_TEXT =
+  "Ta yêu nhau tự cuối đông,\nXuân về e ấp má hồng dịu êm.\nHạ qua nắng hạ bên thềm,\nThu sang chạm nhẹ tơ mềm đắm say.\nĐông về rét mướt heo may,\nBốn mùa trôi qua, tay vẫn trong tay.";
+
+const LETTER_QUOTE_TEXT =
+  "Thực ra thế giới của anh rất nhỏ bé. Nhỏ đến mức mọi ngả đường anh đi đều dẫn về phía em, và mọi lựa chọn khác ngoài em đều trở nên vô nghĩa...";
+
+type LetterPhase =
+  | "closed"
+  | "opening"
+  | "extracting"
+  | "unfolded"
+  | "closing-envelope-up"
+  | "closing-folding"
+  | "closing-seal"
+  | "closing-glide";
+
+function LoveLetterIntro({
+  loveDays,
+  onOpenDateModal,
+  onClose,
+}: {
+  loveDays: number;
+  onOpenDateModal: () => void;
+  onClose: () => void;
+}) {
+  const [phase, setPhase] = useState<LetterPhase>("closed");
+  const [typedCharCount, setTypedCharCount] = useState(0);
+  const [typedCharCountP2, setTypedCharCountP2] = useState(0);
+  const [letterPage, setLetterPage] = useState<1 | 2>(1);
+  const bgmRef = useRef<HTMLVideoElement>(null);
+  const [bgmReady, setBgmReady] = useState(false);
+
+  const totalChars1 = LETTER_POEM_TEXT.length;
+  const isTypingDone1 = typedCharCount >= totalChars1;
+
+  const totalChars2 = LETTER_QUOTE_TEXT.length;
+  const isTypingDone2 = typedCharCountP2 >= totalChars2;
+
+  // Auto-play background music on mount (loop)
+  useEffect(() => {
+    const vid = bgmRef.current;
+    if (!vid) return;
+    vid.volume = 0.45;
+    vid.loop = true;
+    const tryPlay = () => {
+      vid.play().then(() => setBgmReady(true)).catch(() => {
+        // Autoplay blocked — will play on first user click
+      });
+    };
+    tryPlay();
+
+    // Fallback: play on first user interaction if autoplay was blocked
+    const handleInteraction = () => {
+      if (vid.paused) {
+        vid.play().then(() => setBgmReady(true)).catch(() => {});
+      }
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener("touchstart", handleInteraction);
+    };
+    document.addEventListener("click", handleInteraction, { once: true });
+    document.addEventListener("touchstart", handleInteraction, { once: true });
+
+    return () => {
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener("touchstart", handleInteraction);
+    };
+  }, []);
+
+  // 4-Phase Cinematic Reverse Closing Sequence & Music Sync
+  const handleClose = () => {
+    if (phase.startsWith("closing")) return;
+
+    // Start background music volume fade out over exact duration (2100ms)
+    const vid = bgmRef.current;
+    if (vid && !vid.paused) {
+      const initialVol = vid.volume;
+      const startTime = Date.now();
+      const fadeDuration = 2100;
+
+      const fadeInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(1, elapsed / fadeDuration);
+        vid.volume = Math.max(0, initialVol * (1 - progress));
+
+        if (progress >= 1) {
+          clearInterval(fadeInterval);
+          vid.pause();
+          vid.currentTime = 0;
+        }
+      }, 25);
+    }
+
+    // Step 1: Envelope glides up from bottom so top opening touches base of letter (0ms -> 500ms)
+    setPhase("closing-envelope-up");
+
+    // Step 2: Letter paper glides down INTO envelope pocket behind front flaps (500ms -> 1050ms)
+    setTimeout(() => {
+      setPhase("closing-folding");
+    }, 500);
+
+    // Step 3: Top flap folds 180deg back down & wax seal seals (1050ms -> 1550ms)
+    setTimeout(() => {
+      setPhase("closing-seal");
+    }, 1050);
+
+    // Step 4: Sealed envelope shrinks & glides to exact sidebar navbar letter button (✉) (1550ms -> 2150ms)
+    setTimeout(() => {
+      setPhase("closing-glide");
+    }, 1550);
+
+    // Final: Envelope lands on navbar button, audio reaches 0, unmount intro modal (2150ms)
+    setTimeout(() => {
+      onClose();
+    }, 2150);
+  };
+
+  const handleOpen = () => {
+    if (phase !== "closed") return;
+    setPhase("opening");
+
+    // Phase 2: Pull letter paper upwards out of envelope (after 450ms)
+    setTimeout(() => {
+      setPhase("extracting");
+    }, 450);
+
+    // Phase 3: Smoothly transition to full reading paper & typewriter (after 1000ms)
+    setTimeout(() => {
+      setPhase("unfolded");
+    }, 1000);
+  };
+
+  // Lock body scroll while letter intro is active
+  useEffect(() => {
+    const originalStyle = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
+
+  // Typewriter effect interval for Page 1
+  useEffect(() => {
+    if (phase !== "unfolded" || letterPage !== 1) return;
+
+    const timer = setInterval(() => {
+      setTypedCharCount((prev) => {
+        if (prev >= totalChars1) {
+          clearInterval(timer);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 80);
+
+    return () => clearInterval(timer);
+  }, [phase, letterPage, totalChars1]);
+
+  // Typewriter effect interval for Page 2
+  useEffect(() => {
+    if (phase !== "unfolded" || letterPage !== 2) return;
+
+    const timer = setInterval(() => {
+      setTypedCharCountP2((prev) => {
+        if (prev >= totalChars2) {
+          clearInterval(timer);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 80);
+
+    return () => clearInterval(timer);
+  }, [phase, letterPage, totalChars2]);
+
+  const isEnvelopeOpen =
+    phase === "opening" ||
+    phase === "extracting" ||
+    phase === "unfolded" ||
+    phase === "closing-envelope-up" ||
+    phase === "closing-folding";
+
+  // Calculate typed texts
+  const poemTyped = LETTER_POEM_TEXT.slice(0, typedCharCount);
+  const quoteTyped = LETTER_QUOTE_TEXT.slice(0, typedCharCountP2);
+
+  return (
+    <div
+      className={`love-letter-backdrop phase-${phase}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Lá thư tình yêu"
+    >
+      {/* Background Audio/Video */}
+      <video
+        ref={bgmRef}
+        src="/0808.mp4"
+        loop
+        playsInline
+        style={{ display: "none" }}
+      />
+
+      <div className={`love-letter-scene phase-${phase}`}>
+        {/* Feature 1: Heart Fireworks Burst on Typing Complete */}
+        <HeartFireworks active={isTypingDone2 && letterPage === 2} />
+
+        {/* 3D Envelope Structure */}
+        <div className="envelope-3d-wrapper">
+          <div
+            className={`envelope-3d-box${isEnvelopeOpen ? " is-open" : ""}`}
+            role="button"
+            tabIndex={0}
+            onClick={handleOpen}
+            onKeyDown={(e) => e.key === "Enter" && handleOpen()}
+            aria-label="Mở lá thư 3D"
+          >
+            {/* 3D Envelope Backing */}
+            <div className="envelope-3d-back" />
+
+            {/* 3D Folding Flaps */}
+            <div className="envelope-3d-left" />
+            <div className="envelope-3d-right" />
+            <div className="envelope-3d-bottom" />
+            <div className="envelope-3d-top" />
+
+            {/* Wax Seal holding top flap */}
+            <div className="wax-seal-3d" aria-hidden="true">
+              ♥
+            </div>
+          </div>
+        </div>
+
+        {!isEnvelopeOpen && (
+          <span className="envelope-prompt-badge">
+            <span>✉</span> Chạm nhẹ vào tem sáp để mở lá thư ♥
+          </span>
+        )}
+
+        {/* Continuous Single-Paper Sheet */}
+        <div className="continuous-letter-paper">
+          {/* Feature 4: Interactive 3D Polaroid Card */}
+          <PolaroidCard />
+
+          <div className="letter-header">
+            <button
+              className="love-days-badge"
+              type="button"
+              onClick={onOpenDateModal}
+              title="Nhấp để thay đổi ngày kỷ niệm yêu nhau"
+            >
+              <span aria-hidden="true">♥</span>
+              <span>Bên nhau {loveDays} ngày</span>
+            </button>
+            <span className="letter-heart-icon">✦</span>
+          </div>
+
+          <div className="letter-page-container">
+            {letterPage === 1 ? (
+              <div className="letter-page key-page-1">
+                <div className="letter-body">
+                  <h3 className="letter-salutation">Gửi Em,</h3>
+                  <p className="letter-paragraph" style={{ whiteSpace: "pre-line" }}>
+                    {poemTyped}
+                    {phase === "unfolded" && !isTypingDone1 && (
+                      <span className="type-caret-heart">♥</span>
+                    )}
+                  </p>
+                </div>
+
+                <div className={`letter-actions${isTypingDone1 ? " is-visible" : " is-hidden"}`}>
+                  <button
+                    className="letter-next-btn"
+                    type="button"
+                    onClick={() => setLetterPage(2)}
+                  >
+                    <span>Trang tiếp theo</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="letter-page key-page-2">
+                <div className="letter-body">
+                  <p className="letter-paragraph">
+                    "{quoteTyped}"
+                    {!isTypingDone2 && <span className="type-caret-heart">♥</span>}
+                  </p>
+
+                  {/* Feature 5: Interactive Voiceover Audio Player Widget */}
+                  <VoiceoverWidget bgmRef={bgmRef} />
+
+                  {isTypingDone2 && (
+                    <p className="letter-signature">Yêu em thật nhiều ♥</p>
+                  )}
+                </div>
+
+                <div className={`letter-actions${isTypingDone2 ? " is-visible" : " is-hidden"}`} style={{ marginTop: "24px" }}>
+                  <button
+                    className="letter-next-btn"
+                    type="button"
+                    onClick={handleClose}
+                  >
+                    <span>Xem kỷ niệm của chúng mình</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -651,10 +1530,19 @@ export default function Home() {
   const [deleteIntent, setDeleteIntent] = useState<DeleteIntent | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [notice, setNotice] = useState("");
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  const [uploadBatch, setUploadBatch] = useState<UploadBatch | null>(null);
+  const [contextMenu, setContextMenu] = useState<MediaContextMenu | null>(null);
+  const [introOpen, setIntroOpen] = useState(true);
+  const [loveDateStr, setLoveDateStr] = useState("2026-01-24");
+  const [showDateModal, setShowDateModal] = useState(false);
+  const loveDays = calculateLoveDays(loveDateStr);
 
   useEffect(() => {
     let disposed = false;
     const storedCount = Number(localStorage.getItem("lap-gallery-count"));
+    const storedLoveDate = localStorage.getItem("lap-gallery-love-date");
+    if (storedLoveDate) setLoveDateStr(storedLoveDate);
     // These preferences originate outside React and are synchronized once on mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (COUNT_OPTIONS.includes(storedCount)) setTileCount(storedCount);
@@ -703,8 +1591,40 @@ export default function Home() {
   }, [notice]);
 
   useEffect(() => {
+    if (isAdding || !uploadBatch || uploadTasks.length > 0) return;
+    const timeout = window.setTimeout(() => setUploadBatch(null), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [isAdding, uploadBatch, uploadTasks.length]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      const menuEl = document.querySelector(".media-context-menu");
+      if (menuEl && target && menuEl.contains(target)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    const handleClose = () => setContextMenu(null);
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", handleClose);
+    window.addEventListener("scroll", handleClose, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", handleClose);
+      window.removeEventListener("scroll", handleClose, true);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (contextMenu) {
+        setContextMenu(null);
+        return;
+      }
       if (deleteIntent && !isDeleting) {
         setDeleteIntent(null);
         return;
@@ -713,7 +1633,7 @@ export default function Home() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [deleteIntent, isDeleting]);
+  }, [contextMenu, deleteIntent, isDeleting]);
 
   useEffect(() => {
     if (deleteIntent) deleteCancelButtonRef.current?.focus();
@@ -732,9 +1652,28 @@ export default function Home() {
     [mediaItems],
   );
 
+  const uploadDoneCount = useMemo(
+    () => uploadBatch?.processed ?? 0,
+    [uploadBatch],
+  );
+
+  const uploadErrorCount = useMemo(
+    () => uploadBatch?.errors ?? uploadTasks.filter((task) => task.status === "error").length,
+    [uploadBatch, uploadTasks],
+  );
+  const uploadActiveCount = useMemo(
+    () => uploadTasks.filter((task) => UPLOAD_ACTIVE_STATUSES.has(task.status)).length,
+    [uploadTasks],
+  );
+  const uploadQueuedCount = useMemo(
+    () => uploadTasks.filter((task) => task.status === "queued").length,
+    [uploadTasks],
+  );
+
   const feed = useMemo(() => {
     if (!filteredMedia.length) return [];
-    return Array.from({ length: tileCount }, (_, index) => {
+    const frameCount = Math.max(tileCount, filteredMedia.length + tileCount);
+    return Array.from({ length: frameCount }, (_, index) => {
       const media = filteredMedia[index % filteredMedia.length];
       return {
         media,
@@ -744,14 +1683,62 @@ export default function Home() {
     });
   }, [filteredMedia, tileCount]);
 
+  const repeatedFrameCount = feed.length;
+
   const addFiles = async (files: File[]) => {
+    if (isAdding) {
+      setNotice("Đợi đợt đang thêm xong rồi thêm tiếp nhé.");
+      return;
+    }
+
     const supportedFiles = files.filter((file) => isImageFile(file) || isVideoFile(file));
     if (!supportedFiles.length) {
       setNotice("Không tìm thấy ảnh hoặc video có định dạng được hỗ trợ.");
       return;
     }
 
+    const initialTasks = supportedFiles.map((file, index) => ({
+      id: `${Date.now()}-${index}-${crypto.randomUUID()}`,
+      title: uploadTaskTitle(file, index),
+      fileName: file.name || `Tệp ${index + 1}`,
+      fileSizeLabel: formatFileSize(file.size),
+      kind: mediaKindForFile(file),
+      progress: 4,
+      status: "queued" as UploadTaskStatus,
+      detail: "Đang chờ xử lý",
+    }));
+    const updateUploadTask = (id: string, patch: Partial<UploadTask>) => {
+      setUploadTasks((tasks) =>
+        tasks.map((task) => (task.id === id ? { ...task, ...patch } : task)),
+      );
+    };
+    const finishUploadTask = (id: string, failed = false) => {
+      setUploadBatch((batch) =>
+        batch
+          ? {
+              ...batch,
+              processed: Math.min(batch.total, batch.processed + 1),
+              errors: batch.errors + (failed ? 1 : 0),
+            }
+          : batch,
+      );
+      if (!failed) {
+        window.setTimeout(() => {
+          setUploadTasks((tasks) => tasks.filter((task) => task.id !== id));
+        }, 650);
+      }
+    };
+
     setIsAdding(true);
+    setManagerOpen(true);
+    setUploadTasks(initialTasks);
+    setUploadBatch({
+      total: initialTasks.length,
+      processed: 0,
+      errors: 0,
+    });
+    await waitForPaint();
+
     const added: GalleryMedia[] = [];
     const unsupported = files.length - supportedFiles.length;
     let unreadable = 0;
@@ -763,28 +1750,85 @@ export default function Home() {
       // The import can continue even when persistent storage is unavailable.
     }
 
-    for (const file of supportedFiles) {
+    const uploadJobs = supportedFiles.map((file, index) => ({
+      file,
+      task: initialTasks[index],
+    }));
+    const imageJobs = uploadJobs.filter((job) => job.task.kind === "image");
+    const videoJobs = uploadJobs.filter((job) => job.task.kind === "video");
+
+    const processUploadJob = async ({
+      file,
+      task,
+    }: {
+      file: File;
+      task: UploadTask;
+    }) => {
       let prepared: GalleryMedia | undefined;
+      updateUploadTask(task.id, {
+        progress: 12,
+        status: "reading",
+        detail: file.type.startsWith("video/") || isVideoFile(file)
+          ? "Đang mở video"
+          : "Đang mở ảnh",
+      });
+      await waitForPaint();
+
       try {
         prepared = isVideoFile(file)
-          ? await prepareVideo(file)
-          : await prepareImage(file);
+          ? await prepareVideo(file, (progress, detail, status) => {
+              updateUploadTask(task.id, { progress, detail, status: status ?? "reading" });
+            })
+          : await prepareImage(file, (progress, detail, status) => {
+              updateUploadTask(task.id, { progress, detail, status: status ?? "reading" });
+            });
       } catch {
         unreadable += 1;
-        continue;
+        updateUploadTask(task.id, {
+          progress: 100,
+          status: "error",
+          detail: "Không đọc được mục này",
+        });
+        finishUploadTask(task.id, true);
+        await waitForPaint();
+        return;
       }
+
+      updateUploadTask(task.id, {
+        progress: 88,
+        status: "saving",
+        detail: "Đang lưu vào trình duyệt",
+      });
+      await waitForPaint();
 
       try {
         await saveMedia(prepared);
+        updateUploadTask(task.id, {
+          progress: 100,
+          status: "complete",
+          detail: "Đã thêm vào thư viện",
+        });
+        finishUploadTask(task.id);
       } catch {
         prepared = { ...prepared, temporary: true };
         temporary += 1;
+        updateUploadTask(task.id, {
+          progress: 100,
+          status: "temporary",
+          detail: "Đã thêm, chỉ giữ trong phiên này",
+        });
+        finishUploadTask(task.id);
       }
       added.push(prepared);
-    }
+      setMediaItems((current) => [...current, prepared]);
+      await waitForPaint();
+    };
 
-    setMediaItems((current) => [...current, ...added]);
-    setManagerOpen(true);
+    await Promise.all([
+      runLimitedQueue(imageJobs, UPLOAD_IMAGE_CONCURRENCY, processUploadJob),
+      runLimitedQueue(videoJobs, UPLOAD_VIDEO_CONCURRENCY, processUploadJob),
+    ]);
+
     setIsAdding(false);
 
     const details = [
@@ -793,7 +1837,9 @@ export default function Home() {
       unsupported ? `${unsupported} tệp không đúng định dạng` : "",
     ].filter(Boolean);
 
-    if (details.length) {
+    if (!added.length) {
+      setNotice(`Không thêm được khoảnh khắc nào. ${details.join(" • ")}.`);
+    } else if (details.length) {
       setNotice(`Đã thêm ${added.length} mục. ${details.join(" • ")}.`);
     } else {
       setNotice(`Đã thêm ${added.length} mục vào bảng.`);
@@ -825,8 +1871,8 @@ export default function Home() {
       await saveMedia(updated);
       setNotice(
         updated.special
-          ? `“${updated.name}” đã thành nội dung đặc biệt.`
-          : `“${updated.name}” đã trở về ô thường.`,
+          ? "Khoảnh khắc này đã thành nội dung đặc biệt."
+          : "Khoảnh khắc này đã trở về ô thường.",
       );
     } catch {
       setNotice("Thay đổi đã áp dụng nhưng chưa thể lưu cho lần mở sau.");
@@ -845,7 +1891,7 @@ export default function Home() {
         setPreview((current) => current?.id === media.id ? null : current);
         setMediaItems((items) => items.filter((item) => item.id !== media.id));
         if (media.kind === "video") URL.revokeObjectURL(media.src);
-        setNotice(`Đã xóa “${media.name}”.`);
+        setNotice("Đã xóa một khoảnh khắc.");
       } else {
         const removedItems = [...mediaRef.current];
         await clearMedia();
@@ -869,6 +1915,23 @@ export default function Home() {
     localStorage.setItem("lap-gallery-count", String(count));
   };
 
+  const shuffleMedia = () => {
+    if (mediaItems.length < 2) {
+      setNotice("Cần ít nhất 2 khoảnh khắc để xáo trộn.");
+      return;
+    }
+    setContextMenu(null);
+    setMediaItems((current) => {
+      const shuffled = [...current];
+      for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+      }
+      return shuffled;
+    });
+    setNotice("Đã xáo trộn bố cục kỷ niệm cho đoạn quay mới.");
+  };
+
   const toggleEffects = () => {
     const nextEnabled = !effectsEnabled;
     setEffectsEnabled(nextEnabled);
@@ -877,7 +1940,25 @@ export default function Home() {
   };
 
   const openCard = (media: GalleryMedia) => {
+    setContextMenu(null);
     setPreview(media);
+  };
+
+  const openMediaMenu = (
+    event: MouseEvent<HTMLElement>,
+    media: GalleryMedia,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = 190;
+    const menuHeight = 112;
+    const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
+    const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
+    setContextMenu({
+      media,
+      x: Math.max(12, x),
+      y: Math.max(12, y),
+    });
   };
 
   const onCardKeyDown = (
@@ -903,7 +1984,7 @@ export default function Home() {
         ref={fileInputRef}
         className="visually-hidden"
         type="file"
-        accept="image/*,video/*,.mov,.m4v"
+        accept="image/*,video/*,.heic,.heif,image/heic,image/heif,.mov,.m4v"
         multiple
         onChange={onFileChange}
       />
@@ -932,6 +2013,14 @@ export default function Home() {
           +
         </button>
         <span className="nav-spacer" />
+        <button
+          className="nav-icon"
+          type="button"
+          aria-label="Đọc lại lá thư tình yêu"
+          onClick={() => setIntroOpen(true)}
+        >
+          ✉
+        </button>
         <button
           className="nav-icon"
           type="button"
@@ -985,6 +2074,15 @@ export default function Home() {
             <b>{mediaItems.length}</b>
           </button>
           <button
+            className="shuffle-button"
+            type="button"
+            disabled={mediaItems.length < 2}
+            onClick={shuffleMedia}
+          >
+            <Shuffle weight="bold" aria-hidden="true" />
+            Xáo trộn
+          </button>
+          <button
             className="primary-button"
             type="button"
             disabled={isAdding}
@@ -997,6 +2095,16 @@ export default function Home() {
 
         <section className="intro-row" aria-labelledby="page-title">
           <div className="intro-content">
+            <button
+              className="love-days-badge"
+              type="button"
+              onClick={() => setShowDateModal(true)}
+              title="Nhấp để thay đổi ngày kỷ niệm"
+              style={{ marginBottom: "10px" }}
+            >
+              <span aria-hidden="true">♥</span>
+              <span>Bên nhau {loveDays} ngày</span>
+            </button>
             <p className="eyebrow"><span aria-hidden="true">♥</span> NHẬT KÝ ẢNH &amp; VIDEO CỦA HAI ĐỨA</p>
             <AnimatedHeadline />
             <p className="intro-copy">
@@ -1068,10 +2176,52 @@ export default function Home() {
               </div>
             )}
 
+            {(uploadBatch || uploadTasks.length > 0) && (
+              <div className="upload-progress-panel" role="status" aria-live="polite">
+                <div className="upload-progress-heading">
+                  <div>
+                    <span>Đang nhập kỷ niệm</span>
+                    <strong>{uploadDoneCount}/{uploadBatch?.total ?? uploadTasks.length} mục đã xử lý</strong>
+                    <small>
+                      {uploadActiveCount} đang chạy • {uploadQueuedCount} đang chờ • xong mục nào ẩn mục đó
+                    </small>
+                  </div>
+                  {uploadErrorCount > 0 && <b>{uploadErrorCount} lỗi</b>}
+                </div>
+                {uploadTasks.length > 0 && (
+                  <div className="upload-task-list">
+                    {uploadTasks.map((task) => (
+                      <article className={`upload-task is-${task.status}`} key={task.id}>
+                        <span className="upload-task-icon" aria-hidden="true">
+                          {task.kind === "video" ? (
+                            <VideoCamera weight="duotone" />
+                          ) : (
+                            <ImageSquare weight="duotone" />
+                          )}
+                        </span>
+                        <div className="upload-task-body">
+                          <div className="upload-task-copy">
+                            <strong title={task.fileName}>{task.fileName}</strong>
+                            <span>{task.detail}</span>
+                          </div>
+                          <small>{task.title} • {task.fileSizeLabel}</small>
+                          <div className="upload-task-bar" aria-hidden="true">
+                            <i style={{ width: `${task.progress}%` }} />
+                          </div>
+                        </div>
+                        <b>{task.progress}%</b>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {!mediaItems.length ? (
               <button
                 className="drop-zone"
                 type="button"
+                disabled={isAdding}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <span className="upload-disc" aria-hidden="true">↑</span>
@@ -1080,45 +2230,59 @@ export default function Home() {
               </button>
             ) : (
               <div className="source-list">
-                {mediaItems.map((media) => (
-                  <article className={`source-card${media.special ? " special" : ""}`} key={media.id}>
-                    {media.kind === "video" ? (
-                      <video src={media.src} muted playsInline preload="metadata" aria-hidden="true" />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={media.src} alt="" />
-                    )}
-                    <div className="source-info">
-                      <strong title={media.name}>{media.name}</strong>
-                      <span>
-                        {media.kind === "video" ? `VIDEO • ${formatDuration(media.duration)} • ` : "ẢNH • "}
-                        {media.width} × {media.height}
-                      </span>
-                      {media.temporary && <span className="temporary-media-label">CHỈ TRONG PHIÊN NÀY</span>}
-                    </div>
-                    <button
-                      className="special-toggle"
-                      type="button"
-                      role="switch"
-                      aria-checked={media.special}
-                      onClick={() => void toggleSpecial(media.id)}
+                {mediaItems.map((media, index) => {
+                  const sourceTitle = numberedMediaTitle(media, index);
+                  return (
+                    <article
+                      className={`source-card${media.special ? " special" : ""}`}
+                      key={media.id}
+                      onContextMenu={(event) => openMediaMenu(event, media)}
                     >
-                      <span aria-hidden="true">★</span>
-                      {media.special ? "Yêu thích" : "Ghim lại"}
-                    </button>
-                    <button
-                      className="delete-button"
-                      type="button"
-                      onClick={() => setDeleteIntent({ kind: "single", media })}
-                      aria-label={`Xóa ${media.name}`}
-                    >
-                      ×
-                    </button>
-                  </article>
-                ))}
-                <button className="add-source-card" type="button" onClick={() => fileInputRef.current?.click()}>
+                      {media.kind === "video" ? (
+                        <video src={media.src} muted playsInline preload="metadata" aria-hidden="true" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={media.src} alt="" />
+                      )}
+                      <div className="source-info">
+                        <div className="source-title">
+                          {media.kind === "video" ? (
+                            <VideoCamera weight="duotone" aria-hidden="true" />
+                          ) : (
+                            <ImageSquare weight="duotone" aria-hidden="true" />
+                          )}
+                          <strong>{sourceTitle}</strong>
+                        </div>
+                        <span>
+                          {media.kind === "video" ? "VIDEO" : "ẢNH"} • {mediaDetails(media)}
+                        </span>
+                        {media.temporary && <span className="temporary-media-label">CHỈ TRONG PHIÊN NÀY</span>}
+                      </div>
+                      <button
+                        className="special-toggle"
+                        type="button"
+                        role="switch"
+                        aria-checked={media.special}
+                        aria-label={media.special ? `Bỏ ghim ${sourceTitle}` : `Ghim ${sourceTitle}`}
+                        onClick={() => void toggleSpecial(media.id)}
+                      >
+                        <span aria-hidden="true">★</span>
+                        {media.special ? "Yêu thích" : "Ghim lại"}
+                      </button>
+                      <button
+                        className="delete-button"
+                        type="button"
+                        onClick={() => setDeleteIntent({ kind: "single", media })}
+                        aria-label={`Xóa ${sourceTitle}`}
+                      >
+                        ×
+                      </button>
+                    </article>
+                  );
+                })}
+                <button className="add-source-card" type="button" disabled={isAdding} onClick={() => fileInputRef.current?.click()}>
                   <span aria-hidden="true">+</span>
-                  Thêm khoảnh khắc
+                  {isAdding ? "Đang nhập" : "Thêm khoảnh khắc"}
                 </button>
               </div>
             )}
@@ -1159,7 +2323,7 @@ export default function Home() {
             <div className="gallery-meta">
               <p>
                 <span className="gallery-kicker">ĐANG LẶP</span>
-                {filteredMedia.length} kỷ niệm đang tạo thành {tileCount} khung hình
+                {filteredMedia.length} kỷ niệm đang tạo thành {repeatedFrameCount} khung hình
               </p>
               <p>{mediaItems.filter((media) => media.special).length} khoảnh khắc yêu thích</p>
             </div>
@@ -1170,29 +2334,28 @@ export default function Home() {
                   key={key}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Xem ${media.kind === "video" ? "video" : "ảnh"} ${media.name}${media.special ? ", nội dung đặc biệt" : ""}`}
+                  aria-label={`Xem ${mediaKindTitle(media).toLocaleLowerCase("vi")}${media.special ? ", nội dung đặc biệt" : ""}`}
                   onClick={() => openCard(media)}
+                  onContextMenu={(event) => openMediaMenu(event, media)}
                   onKeyDown={(event) => onCardKeyDown(event, media)}
-                  style={{
-                    gridColumn: media.special ? "span 2" : "span 1",
-                    gridRow: `span ${rowSpanFor(media, occurrence)}`,
-                  }}
+                  style={cardGridStyle(media, occurrence)}
                 >
                   {media.kind === "video" ? (
                     <AutoPreviewVideo src={media.src} />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={media.src} alt={media.name} loading="lazy" />
+                    <img src={media.src} alt="" loading="lazy" />
                   )}
-                  <div className="card-shade" />
-                  <div className="card-label">
-                    {media.special && <span>YÊU THÍCH</span>}
-                    <strong>{media.name}</strong>
-                  </div>
+                  {media.special && (
+                    <span className="favorite-ribbon" aria-hidden="true">
+                      <Heart weight="fill" />
+                      YÊU THÍCH
+                    </span>
+                  )}
                   <button
                     className={`quick-star${media.special ? " active" : ""}`}
                     type="button"
-                    aria-label={media.special ? `Bỏ đánh dấu ${media.name}` : `Đánh dấu ${media.name} là đặc biệt`}
+                    aria-label={media.special ? "Bỏ đánh dấu khoảnh khắc này" : "Đánh dấu khoảnh khắc này là đặc biệt"}
                     onClick={(event) => {
                       event.stopPropagation();
                       void toggleSpecial(media.id);
@@ -1214,8 +2377,43 @@ export default function Home() {
         )}
       </main>
 
+      {contextMenu && (
+        <div
+          className="media-context-menu"
+          role="menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              void toggleSpecial(contextMenu.media.id);
+              setContextMenu(null);
+            }}
+          >
+            <Star weight={contextMenu.media.special ? "fill" : "duotone"} aria-hidden="true" />
+            {contextMenu.media.special ? "Bỏ yêu thích" : "Yêu thích"}
+          </button>
+          <button
+            className="danger"
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const mediaToDelete = contextMenu.media;
+              setContextMenu(null);
+              setDeleteIntent({ kind: "single", media: mediaToDelete });
+            }}
+          >
+            <Trash weight="duotone" aria-hidden="true" />
+            Xóa
+          </button>
+        </div>
+      )}
+
       {preview && (
-        <div className="lightbox" role="dialog" aria-modal="true" aria-label={`Xem ${preview.kind === "video" ? "video" : "ảnh"} ${preview.name}`}>
+        <div className="lightbox" role="dialog" aria-modal="true" aria-label={`Xem ${mediaKindTitle(preview).toLocaleLowerCase("vi")}`}>
           <button className="lightbox-close" type="button" onClick={() => setPreview(null)} aria-label="Đóng trình xem">
             ×
           </button>
@@ -1223,10 +2421,10 @@ export default function Home() {
             {preview.kind === "video" ? (
               // User-provided clips do not have a separate caption track available.
               // eslint-disable-next-line jsx-a11y/media-has-caption
-              <video src={preview.src} controls autoPlay playsInline preload="metadata" aria-label={preview.name} />
+              <video src={preview.src} controls autoPlay playsInline preload="metadata" aria-label={mediaKindTitle(preview)} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={preview.src} alt={preview.name} />
+              <img src={preview.src} alt={mediaKindTitle(preview)} />
             )}
           </div>
           <div className="lightbox-info">
@@ -1236,7 +2434,8 @@ export default function Home() {
                   ? (preview.special ? "VIDEO YÊU THÍCH" : "MỘT ĐOẠN KỶ NIỆM")
                   : (preview.special ? "ẢNH YÊU THÍCH" : "MỘT TẤM KỶ NIỆM")}
               </span>
-              <h2>{preview.name}</h2>
+              <h2>{mediaKindTitle(preview)}</h2>
+              <p>{mediaDetails(preview)}</p>
             </div>
             <button type="button" onClick={() => void toggleSpecial(preview.id)}>
               <span aria-hidden="true">♥</span>
@@ -1266,7 +2465,7 @@ export default function Home() {
             <h2 id="delete-confirm-title">
               {deleteIntent.kind === "all"
                 ? `Xóa toàn bộ ${mediaItems.length} khoảnh khắc?`
-                : `Xóa “${deleteIntent.media.name}”?`}
+                : "Xóa khoảnh khắc này?"}
             </h2>
             <p id="delete-confirm-description">
               {deleteIntent.kind === "all"
@@ -1299,6 +2498,23 @@ export default function Home() {
       )}
 
       {notice && <div className="toast" role="status">{notice}</div>}
+      {introOpen && (
+        <LoveLetterIntro
+          loveDays={loveDays}
+          onOpenDateModal={() => setShowDateModal(true)}
+          onClose={() => setIntroOpen(false)}
+        />
+      )}
+      {showDateModal && (
+        <LoveDateModal
+          currentDate={loveDateStr}
+          onSave={(date) => {
+            setLoveDateStr(date);
+            localStorage.setItem("lap-gallery-love-date", date);
+          }}
+          onClose={() => setShowDateModal(false)}
+        />
+      )}
     </div>
   );
 }
