@@ -972,14 +972,17 @@ function HeartFireworks({ active }: { active: boolean }) {
 function PolaroidCard() {
   const [isFlipped, setIsFlipped] = useState(false);
   const polaroidInputRef = useRef<HTMLInputElement>(null);
-  const [photoSrc, setPhotoSrc] = useState<string | null>(null);
+  const [photoSrc, setPhotoSrc] = useState<string>("/og-v2.png");
 
   useEffect(() => {
     const savedPhoto = localStorage.getItem("lap-gallery-polaroid-photo");
     if (savedPhoto) setPhotoSrc(savedPhoto);
 
     getSupabaseSetting("polaroid_photo").then((url) => {
-      if (url) setPhotoSrc(url);
+      if (url) {
+        setPhotoSrc(url);
+        localStorage.setItem("lap-gallery-polaroid-photo", url);
+      }
     });
 
     const channel = supabase
@@ -989,7 +992,11 @@ function PolaroidCard() {
         { event: "*", schema: "public", table: "app_settings" },
         (payload) => {
           if (payload.new && (payload.new as { key: string; value: string }).key === "polaroid_photo") {
-            setPhotoSrc((payload.new as { key: string; value: string }).value);
+            const newUrl = (payload.new as { key: string; value: string }).value;
+            if (newUrl) {
+              setPhotoSrc(newUrl);
+              localStorage.setItem("lap-gallery-polaroid-photo", newUrl);
+            }
           }
         }
       )
@@ -1011,6 +1018,7 @@ function PolaroidCard() {
       try {
         const publicUrl = await uploadToSupabaseStorage(file, `polaroid_${file.name}`);
         setPhotoSrc(publicUrl);
+        localStorage.setItem("lap-gallery-polaroid-photo", publicUrl);
         await setSupabaseSetting("polaroid_photo", publicUrl);
       } catch (err) {
         console.error("Failed to upload polaroid to Supabase:", err);
@@ -1022,7 +1030,7 @@ function PolaroidCard() {
   return (
     <div
       className={`polaroid-3d-card${isFlipped ? " is-flipped" : ""}`}
-      title={photoSrc ? "Nhấp để lật xem lời nhắn bí mật ♥" : "Nhấp để chọn ảnh kỷ niệm ♥"}
+      title="Nhấp để lật xem lời nhắn bí mật ♥"
     >
       <input
         ref={polaroidInputRef}
@@ -1037,23 +1045,50 @@ function PolaroidCard() {
             className="polaroid-photo-frame"
             onClick={(e) => {
               e.stopPropagation();
-              if (!photoSrc) {
-                polaroidInputRef.current?.click();
-              } else {
-                setIsFlipped(true);
-              }
+              setIsFlipped(true);
             }}
           >
-            {photoSrc ? (
-              <img src={photoSrc} alt="Kỷ niệm của chúng mình" />
-            ) : (
-              <div className="polaroid-photo-placeholder">
-                <span style={{ fontSize: "28px" }}>📷</span>
-                <span>Chọn ảnh kỷ niệm</span>
-              </div>
-            )}
+            <img src={photoSrc} alt="Kỷ niệm của chúng mình" />
+            <button
+              type="button"
+              className="polaroid-edit-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                polaroidInputRef.current?.click();
+              }}
+              title="Đổi ảnh kỷ niệm"
+              style={{
+                position: "absolute",
+                top: "6px",
+                right: "6px",
+                background: "rgba(0, 0, 0, 0.55)",
+                color: "#fff",
+                border: "none",
+                borderRadius: "50%",
+                width: "28px",
+                height: "28px",
+                fontSize: "14px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              📷
+            </button>
           </div>
-          <p className="polaroid-caption">{photoSrc ? "Góc kỷ niệm ♥" : "Thêm ảnh ♥"}</p>
+          <p
+            className="polaroid-caption"
+            onClick={(e) => {
+              e.stopPropagation();
+              polaroidInputRef.current?.click();
+            }}
+            style={{ cursor: "pointer" }}
+            title="Nhấp để đổi ảnh kỷ niệm"
+          >
+            Góc kỷ niệm ♥
+          </p>
         </div>
         <div
           className="polaroid-back"
@@ -1147,7 +1182,7 @@ function VoiceoverWidget({
 }) {
   const [voiceSrc, setVoiceSrc] = useState<string>("/0808.mp4");
   const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isFinishedRef = useRef(false);
 
@@ -1244,7 +1279,11 @@ function VoiceoverWidget({
       tryAutoPlay();
     } else {
       audio.addEventListener("canplay", tryAutoPlay, { once: true });
-      return () => audio.removeEventListener("canplay", tryAutoPlay);
+      audio.addEventListener("loadedmetadata", tryAutoPlay, { once: true });
+      return () => {
+        audio.removeEventListener("canplay", tryAutoPlay);
+        audio.removeEventListener("loadedmetadata", tryAutoPlay);
+      };
     }
   }, [autoPlay, voiceSrc]);
 
@@ -1282,14 +1321,16 @@ function VoiceoverWidget({
       <input
         ref={fileInputRef}
         type="file"
-        accept="audio/*"
+        accept="audio/*,video/*"
         style={{ display: "none" }}
         onChange={handleUpload}
       />
       {voiceSrc && (
-        <audio
+        <video
           ref={audioRef}
           src={voiceSrc}
+          playsInline
+          style={{ display: "none" }}
           onTimeUpdate={handleTimeUpdate}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
