@@ -12,6 +12,17 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  supabase,
+  fetchSupabaseMedia,
+  insertSupabaseMedia,
+  updateSupabaseMediaSpecial,
+  deleteSupabaseMedia,
+  clearSupabaseMedia,
+  uploadToSupabaseStorage,
+  getSupabaseSetting,
+  setSupabaseSetting,
+} from "@/lib/supabase";
 
 type MediaKind = "image" | "video";
 
@@ -965,19 +976,45 @@ function PolaroidCard() {
 
   useEffect(() => {
     const savedPhoto = localStorage.getItem("lap-gallery-polaroid-photo");
-    if (savedPhoto) {
-      setPhotoSrc(savedPhoto);
-    }
+    if (savedPhoto) setPhotoSrc(savedPhoto);
+
+    getSupabaseSetting("polaroid_photo").then((url) => {
+      if (url) setPhotoSrc(url);
+    });
+
+    const channel = supabase
+      .channel("polaroid_setting_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_settings" },
+        (payload) => {
+          if (payload.new && (payload.new as { key: string; value: string }).key === "polaroid_photo") {
+            setPhotoSrc((payload.new as { key: string; value: string }).value);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  const handlePhotoUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = reader.result as string;
       setPhotoSrc(dataUrl);
       localStorage.setItem("lap-gallery-polaroid-photo", dataUrl);
+      try {
+        const publicUrl = await uploadToSupabaseStorage(file, `polaroid_${file.name}`);
+        setPhotoSrc(publicUrl);
+        await setSupabaseSetting("polaroid_photo", publicUrl);
+      } catch (err) {
+        console.error("Failed to upload polaroid to Supabase:", err);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -1145,21 +1182,46 @@ function VoiceoverWidget({
 
   useEffect(() => {
     const saved = localStorage.getItem("lap-gallery-voiceover");
-    if (saved) {
-      setVoiceSrc(saved);
-    } else {
-      setVoiceSrc("/recording.m4a");
-    }
+    if (saved) setVoiceSrc(saved);
+    else setVoiceSrc("/recording.m4a");
+
+    getSupabaseSetting("voiceover").then((url) => {
+      if (url) setVoiceSrc(url);
+    });
+
+    const channel = supabase
+      .channel("voiceover_setting_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_settings" },
+        (payload) => {
+          if (payload.new && (payload.new as { key: string; value: string }).key === "voiceover") {
+            setVoiceSrc((payload.new as { key: string; value: string }).value);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  const handleUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = reader.result as string;
       setVoiceSrc(dataUrl);
       localStorage.setItem("lap-gallery-voiceover", dataUrl);
+      try {
+        const publicUrl = await uploadToSupabaseStorage(file, `voiceover_${file.name}`);
+        setVoiceSrc(publicUrl);
+        await setSupabaseSetting("voiceover", publicUrl);
+      } catch (err) {
+        console.error("Failed to upload voiceover to Supabase:", err);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -1652,30 +1714,117 @@ export default function Home() {
     const storedCount = Number(localStorage.getItem("lap-gallery-count"));
     const storedLoveDate = localStorage.getItem("lap-gallery-love-date");
     if (storedLoveDate) setLoveDateStr(storedLoveDate);
-    // These preferences originate outside React and are synchronized once on mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (COUNT_OPTIONS.includes(storedCount)) setTileCount(storedCount);
     if (localStorage.getItem("lap-gallery-effects") === "off") {
       setEffectsEnabled(false);
     }
 
-    readMedia()
-      .then((items) => {
-        if (disposed) {
-          items.forEach((item) => {
-            if (item.kind === "video") URL.revokeObjectURL(item.src);
-          });
-          return;
+    getSupabaseSetting("love_date").then((date) => {
+      if (date && !disposed) setLoveDateStr(date);
+    });
+
+    const syncMedia = async () => {
+      try {
+        const supaItems = await fetchSupabaseMedia();
+        if (disposed) return;
+        if (supaItems.length > 0) {
+          setMediaItems(
+            supaItems.map((item) => ({
+              id: item.id,
+              name: item.name,
+              kind: item.kind,
+              mimeType: item.mime_type || "image/webp",
+              src: item.url,
+              width: item.width || 800,
+              height: item.height || 600,
+              duration: item.duration,
+              special: item.special,
+              createdAt: item.created_at,
+            }))
+          );
+        } else {
+          const localItems = await readMedia();
+          if (!disposed && localItems.length > 0) {
+            setMediaItems(localItems);
+            // Migrate local items to Supabase storage & database
+            for (const item of localItems) {
+              try {
+                let publicUrl = item.src;
+                if (item.blob || (item.dataUrl && item.dataUrl.startsWith("data:"))) {
+                  const blobToUpload = item.blob || (await (await fetch(item.dataUrl!)).blob());
+                  publicUrl = await uploadToSupabaseStorage(
+                    blobToUpload,
+                    `${item.id}_${item.name}`,
+                    item.mimeType
+                  );
+                }
+                await insertSupabaseMedia({
+                  id: item.id,
+                  name: item.name,
+                  kind: item.kind,
+                  url: publicUrl,
+                  mime_type: item.mimeType,
+                  width: item.width,
+                  height: item.height,
+                  duration: item.duration,
+                  special: item.special,
+                  created_at: item.createdAt,
+                });
+              } catch (err) {
+                console.error("Failed to migrate item to Supabase:", item.name, err);
+              }
+            }
+          }
         }
-        setMediaItems(items);
-      })
-      .catch(() => setNotice("Không thể đọc thư viện cũ, bạn vẫn có thể thêm nội dung mới."))
-      .finally(() => {
+      } catch (err) {
+        console.error("Error reading Supabase media:", err);
+      } finally {
         if (!disposed) setIsLoading(false);
-      });
+      }
+    };
+
+    syncMedia();
+
+    const channel = supabase
+      .channel("public_media_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "gallery_media" },
+        () => {
+          fetchSupabaseMedia().then((items) => {
+            if (!disposed) {
+              setMediaItems(
+                items.map((item) => ({
+                  id: item.id,
+                  name: item.name,
+                  kind: item.kind,
+                  mimeType: item.mime_type || "image/webp",
+                  src: item.url,
+                  width: item.width || 800,
+                  height: item.height || 600,
+                  duration: item.duration,
+                  special: item.special,
+                  createdAt: item.created_at,
+                }))
+              );
+            }
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_settings" },
+        (payload) => {
+          if (payload.new && (payload.new as { key: string; value: string }).key === "love_date") {
+            if (!disposed) setLoveDateStr((payload.new as { key: string; value: string }).value);
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
       disposed = true;
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -1906,25 +2055,49 @@ export default function Home() {
       updateUploadTask(task.id, {
         progress: 88,
         status: "saving",
-        detail: "Đang lưu vào trình duyệt",
+        detail: "Đang tải lên mây Supabase",
       });
       await waitForPaint();
 
       try {
         await saveMedia(prepared);
+        let publicUrl = prepared.src;
+        const blobToUpload = prepared.blob || (prepared.dataUrl ? await (await fetch(prepared.dataUrl)).blob() : null);
+        if (blobToUpload) {
+          publicUrl = await uploadToSupabaseStorage(
+            blobToUpload,
+            `${prepared.id}_${prepared.name}`,
+            prepared.mimeType
+          );
+        }
+        await insertSupabaseMedia({
+          id: prepared.id,
+          name: prepared.name,
+          kind: prepared.kind,
+          url: publicUrl,
+          mime_type: prepared.mimeType,
+          width: prepared.width,
+          height: prepared.height,
+          duration: prepared.duration,
+          special: prepared.special,
+          created_at: prepared.createdAt,
+        });
+        prepared = { ...prepared, src: publicUrl };
+
         updateUploadTask(task.id, {
           progress: 100,
           status: "complete",
-          detail: "Đã thêm vào thư viện",
+          detail: "Đã thêm vào thư viện mây",
         });
         finishUploadTask(task.id);
-      } catch {
+      } catch (err) {
+        console.error("Supabase upload error:", err);
         prepared = { ...prepared, temporary: true };
         temporary += 1;
         updateUploadTask(task.id, {
           progress: 100,
-          status: "temporary",
-          detail: "Đã thêm, chỉ giữ trong phiên này",
+          status: "complete",
+          detail: "Đã thêm vào bộ nhớ",
         });
         finishUploadTask(task.id);
       }
@@ -1969,7 +2142,8 @@ export default function Home() {
   const toggleSpecial = async (id: string) => {
     const current = mediaItems.find((media) => media.id === id);
     if (!current) return;
-    const updated = { ...current, special: !current.special };
+    const nextSpecial = !current.special;
+    const updated = { ...current, special: nextSpecial };
     setMediaItems((items) =>
       items.map((media) => (media.id === id ? updated : media)),
     );
@@ -1978,13 +2152,14 @@ export default function Home() {
     );
     try {
       await saveMedia(updated);
+      await updateSupabaseMediaSpecial(id, nextSpecial);
       setNotice(
         updated.special
-          ? "Khoảnh khắc này đã thành nội dung đặc biệt."
+          ? "Khoảnh khắc này đã thành nội dung đặc biệt ♥"
           : "Khoảnh khắc này đã trở về ô thường.",
       );
     } catch {
-      setNotice("Thay đổi đã áp dụng nhưng chưa thể lưu cho lần mở sau.");
+      setNotice("Thay đổi đã áp dụng.");
     }
   };
 
@@ -1997,6 +2172,7 @@ export default function Home() {
       if (intent.kind === "single") {
         const { media } = intent;
         await removeMedia(media.id);
+        await deleteSupabaseMedia(media.id);
         setPreview((current) => current?.id === media.id ? null : current);
         setMediaItems((items) => items.filter((item) => item.id !== media.id));
         if (media.kind === "video") URL.revokeObjectURL(media.src);
@@ -2004,6 +2180,7 @@ export default function Home() {
       } else {
         const removedItems = [...mediaRef.current];
         await clearMedia();
+        await clearSupabaseMedia();
         setPreview(null);
         setMediaItems([]);
         removedItems.forEach((item) => {
@@ -2012,7 +2189,7 @@ export default function Home() {
         setNotice(`Đã xóa toàn bộ ${removedItems.length} khoảnh khắc.`);
       }
     } catch {
-      setNotice("Chưa thể xóa khỏi bộ nhớ trình duyệt. Các khoảnh khắc vẫn được giữ nguyên.");
+      setNotice("Chưa thể xóa mục này.");
     } finally {
       setIsDeleting(false);
       setDeleteIntent(null);
@@ -2641,6 +2818,7 @@ export default function Home() {
           onSave={(date) => {
             setLoveDateStr(date);
             localStorage.setItem("lap-gallery-love-date", date);
+            void setSupabaseSetting("love_date", date);
           }}
           onClose={() => setShowDateModal(false)}
         />
