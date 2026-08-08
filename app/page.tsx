@@ -1133,10 +1133,6 @@ function LoveDateModal({
 }
 
 // ==========================================================================
-// LOVE LETTER INTRO COMPONENT
-// ==========================================================================
-
-// ==========================================================================
 // FEATURE 5: VOICEOVER AUDIO PLAYER WIDGET
 // ==========================================================================
 
@@ -1153,32 +1149,7 @@ function VoiceoverWidget({
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const isFinishedRef = useRef(false);
-
-  // Setup Web Audio API GainNode to amplify voice volume beyond 1.0 safely
-  const ensureGainNode = () => {
-    if (gainNodeRef.current || sourceNodeRef.current || !audioRef.current) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AudioCtx();
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
-      const source = ctx.createMediaElementSource(audioRef.current);
-      const gain = ctx.createGain();
-      gain.gain.value = 2.5; // Amplify voice 2.5x
-      source.connect(gain);
-      gain.connect(ctx.destination);
-      audioCtxRef.current = ctx;
-      gainNodeRef.current = gain;
-      sourceNodeRef.current = source;
-    } catch {
-      // Already connected or unsupported
-    }
-  };
 
   useEffect(() => {
     const saved = localStorage.getItem("lap-gallery-voiceover");
@@ -1228,58 +1199,54 @@ function VoiceoverWidget({
 
   const togglePlay = () => {
     if (!audioRef.current || !voiceSrc) return;
+    const audio = audioRef.current;
     if (isPlaying) {
-      audioRef.current.pause();
+      audio.pause();
       setIsPlaying(false);
       if (bgmRef.current) bgmRef.current.volume = 0.45;
     } else {
-      ensureGainNode();
-      if (audioCtxRef.current?.state === "suspended") {
-        audioCtxRef.current.resume();
-      }
-      if (bgmRef.current) bgmRef.current.volume = 0.08;
+      if (bgmRef.current) bgmRef.current.volume = 0.12;
       
-      if (isFinishedRef.current || audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration * 0.95) {
-        audioRef.current.currentTime = 0;
+      if (isFinishedRef.current || audio.ended || audio.currentTime >= audio.duration * 0.95) {
+        audio.currentTime = 0;
         isFinishedRef.current = false;
         onProgress?.(0, true, false);
       } else {
         isFinishedRef.current = false;
       }
       
-      audioRef.current
+      audio
         .play()
         .then(() => setIsPlaying(true))
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Voiceover play error:", err);
+        });
     }
   };
 
   useEffect(() => {
-    if (!autoPlay || !audioRef.current) return;
+    if (!autoPlay || !audioRef.current || !voiceSrc) return;
     const audio = audioRef.current;
 
     const tryAutoPlay = () => {
-      ensureGainNode();
-      if (audioCtxRef.current?.state === "suspended") {
-        audioCtxRef.current.resume();
-      }
-      if (bgmRef.current) bgmRef.current.volume = 0.08;
+      if (bgmRef.current) bgmRef.current.volume = 0.12;
       isFinishedRef.current = false;
       audio
         .play()
         .then(() => setIsPlaying(true))
         .catch(() => {
-          // Autoplay blocked — user will click play manually
+          // Autoplay blocked by browser policy — user can click Play manually
+          if (bgmRef.current) bgmRef.current.volume = 0.45;
         });
     };
 
-    if (audio.readyState >= 3) {
+    if (audio.readyState >= 2) {
       tryAutoPlay();
     } else {
-      audio.addEventListener("canplaythrough", tryAutoPlay, { once: true });
-      return () => audio.removeEventListener("canplaythrough", tryAutoPlay);
+      audio.addEventListener("canplay", tryAutoPlay, { once: true });
+      return () => audio.removeEventListener("canplay", tryAutoPlay);
     }
-  }, [autoPlay]);
+  }, [autoPlay, voiceSrc]);
 
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
@@ -1434,7 +1401,7 @@ function LoveLetterIntro({
       setTypedCharCountP2(totalChars2);
     } else {
       const targetCount = Math.min(totalChars2, Math.floor(progress * totalChars2));
-      setTypedCharCountP2((prev) => (progress === 0 ? 0 : Math.max(prev, targetCount)));
+      setTypedCharCountP2((prev) => (progress === 0 ? prev : Math.max(prev, targetCount)));
     }
   };
 
@@ -1561,8 +1528,22 @@ function LoveLetterIntro({
     return () => clearInterval(timer);
   }, [phase, letterPage, totalChars1]);
 
-  // Page 2 text is driven entirely by voice audio progress (no fallback typewriter)
-  // Text only appears as the voice recording plays
+  // Typewriter effect interval for Page 2 (types out steadily + syncs with voice)
+  useEffect(() => {
+    if (phase !== "unfolded" || letterPage !== 2) return;
+
+    const timer = setInterval(() => {
+      setTypedCharCountP2((prev) => {
+        if (prev >= totalChars2) {
+          clearInterval(timer);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [phase, letterPage, totalChars2]);
 
   const isEnvelopeOpen =
     phase === "opening" ||
