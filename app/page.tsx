@@ -1103,15 +1103,53 @@ function LoveDateModal({
 // FEATURE 5: VOICEOVER AUDIO PLAYER WIDGET
 // ==========================================================================
 
-function VoiceoverWidget({ bgmRef }: { bgmRef: React.RefObject<HTMLVideoElement | null> }) {
-  const [voiceSrc, setVoiceSrc] = useState<string | null>(null);
+function VoiceoverWidget({
+  bgmRef,
+  onProgress,
+  autoPlay,
+}: {
+  bgmRef: React.RefObject<HTMLVideoElement | null>;
+  onProgress?: (progress: number, isPlaying: boolean, isEnded: boolean) => void;
+  autoPlay?: boolean;
+}) {
+  const [voiceSrc, setVoiceSrc] = useState<string>("/recording.m4a");
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const isFinishedRef = useRef(false);
+
+  // Setup Web Audio API GainNode to amplify voice volume beyond 1.0 safely
+  const ensureGainNode = () => {
+    if (gainNodeRef.current || sourceNodeRef.current || !audioRef.current) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+      const source = ctx.createMediaElementSource(audioRef.current);
+      const gain = ctx.createGain();
+      gain.gain.value = 2.5; // Amplify voice 2.5x
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      gainNodeRef.current = gain;
+      sourceNodeRef.current = source;
+    } catch {
+      // Already connected or unsupported
+    }
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem("lap-gallery-voiceover");
-    if (saved) setVoiceSrc(saved);
+    if (saved) {
+      setVoiceSrc(saved);
+    } else {
+      setVoiceSrc("/recording.m4a");
+    }
   }, []);
 
   const handleUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1133,8 +1171,70 @@ function VoiceoverWidget({ bgmRef }: { bgmRef: React.RefObject<HTMLVideoElement 
       setIsPlaying(false);
       if (bgmRef.current) bgmRef.current.volume = 0.45;
     } else {
-      if (bgmRef.current) bgmRef.current.volume = 0.15;
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      ensureGainNode();
+      if (audioCtxRef.current?.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+      if (bgmRef.current) bgmRef.current.volume = 0.08;
+      
+      if (isFinishedRef.current || audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration * 0.95) {
+        audioRef.current.currentTime = 0;
+        isFinishedRef.current = false;
+        onProgress?.(0, true, false);
+      } else {
+        isFinishedRef.current = false;
+      }
+      
+      audioRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    if (!autoPlay || !audioRef.current) return;
+    const audio = audioRef.current;
+
+    const tryAutoPlay = () => {
+      ensureGainNode();
+      if (audioCtxRef.current?.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+      if (bgmRef.current) bgmRef.current.volume = 0.08;
+      isFinishedRef.current = false;
+      audio
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          // Autoplay blocked — user will click play manually
+        });
+    };
+
+    if (audio.readyState >= 3) {
+      tryAutoPlay();
+    } else {
+      audio.addEventListener("canplaythrough", tryAutoPlay, { once: true });
+      return () => audio.removeEventListener("canplaythrough", tryAutoPlay);
+    }
+  }, [autoPlay]);
+
+  const handleTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+    const progress = audio.currentTime / audio.duration;
+
+    if (progress >= 0.965 && !isFinishedRef.current) {
+      isFinishedRef.current = true;
+      audio.pause();
+      setIsPlaying(false);
+      if (bgmRef.current) bgmRef.current.volume = 0.45;
+      onProgress?.(1, false, true);
+      return;
+    }
+
+    if (!isFinishedRef.current) {
+      onProgress?.(progress, true, false);
     }
   };
 
@@ -1151,9 +1251,13 @@ function VoiceoverWidget({ bgmRef }: { bgmRef: React.RefObject<HTMLVideoElement 
         <audio
           ref={audioRef}
           src={voiceSrc}
+          onTimeUpdate={handleTimeUpdate}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           onEnded={() => {
             setIsPlaying(false);
             if (bgmRef.current) bgmRef.current.volume = 0.45;
+            onProgress?.(1, false, true);
           }}
         />
       )}
@@ -1228,6 +1332,7 @@ function LoveLetterIntro({
   const [phase, setPhase] = useState<LetterPhase>("closed");
   const [typedCharCount, setTypedCharCount] = useState(0);
   const [typedCharCountP2, setTypedCharCountP2] = useState(0);
+  const [hasVoicePlayed, setHasVoicePlayed] = useState(false);
   const [letterPage, setLetterPage] = useState<1 | 2>(1);
   const bgmRef = useRef<HTMLVideoElement>(null);
   const [bgmReady, setBgmReady] = useState(false);
@@ -1237,6 +1342,16 @@ function LoveLetterIntro({
 
   const totalChars2 = LETTER_QUOTE_TEXT.length;
   const isTypingDone2 = typedCharCountP2 >= totalChars2;
+
+  const handleVoiceProgress = (progress: number, isPlaying: boolean, isEnded: boolean) => {
+    setHasVoicePlayed(true);
+    if (isEnded || progress >= 0.965) {
+      setTypedCharCountP2(totalChars2);
+    } else {
+      const targetCount = Math.min(totalChars2, Math.floor(progress * totalChars2));
+      setTypedCharCountP2((prev) => (progress === 0 ? 0 : Math.max(prev, targetCount)));
+    }
+  };
 
   // Auto-play background music on mount (loop)
   useEffect(() => {
@@ -1318,6 +1433,10 @@ function LoveLetterIntro({
 
   const handleOpen = () => {
     if (phase !== "closed") return;
+    if (bgmRef.current && bgmRef.current.paused) {
+      bgmRef.current.volume = 0.45;
+      bgmRef.current.play().then(() => setBgmReady(true)).catch(() => {});
+    }
     setPhase("opening");
 
     // Phase 2: Pull letter paper upwards out of envelope (after 450ms)
@@ -1352,27 +1471,13 @@ function LoveLetterIntro({
         }
         return prev + 1;
       });
-    }, 80);
+    }, 140);
 
     return () => clearInterval(timer);
   }, [phase, letterPage, totalChars1]);
 
-  // Typewriter effect interval for Page 2
-  useEffect(() => {
-    if (phase !== "unfolded" || letterPage !== 2) return;
-
-    const timer = setInterval(() => {
-      setTypedCharCountP2((prev) => {
-        if (prev >= totalChars2) {
-          clearInterval(timer);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 80);
-
-    return () => clearInterval(timer);
-  }, [phase, letterPage, totalChars2]);
+  // Page 2 text is driven entirely by voice audio progress (no fallback typewriter)
+  // Text only appears as the voice recording plays
 
   const isEnvelopeOpen =
     phase === "opening" ||
@@ -1488,10 +1593,14 @@ function LoveLetterIntro({
                   </p>
 
                   {/* Feature 5: Interactive Voiceover Audio Player Widget */}
-                  <VoiceoverWidget bgmRef={bgmRef} />
+                  <VoiceoverWidget
+                    bgmRef={bgmRef}
+                    onProgress={handleVoiceProgress}
+                    autoPlay={true}
+                  />
 
                   {isTypingDone2 && (
-                    <p className="letter-signature">Yêu em thật nhiều ♥</p>
+                    <p className="letter-signature">Anh Yêu Em ♥</p>
                   )}
                 </div>
 
@@ -1971,6 +2080,35 @@ export default function Home() {
     }
   };
 
+  const [favNavIndex, setFavNavIndex] = useState(0);
+
+  const scrollToNextFavorite = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    const favElements = document.querySelectorAll(".gallery-card.featured");
+    if (!favElements.length) {
+      const galleryEl = document.getElementById("gallery");
+      if (galleryEl) {
+        galleryEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      setNotice("Chưa có khoảnh khắc nào được ghim Yêu thích ♡");
+      return;
+    }
+
+    const nextIdx = favNavIndex % favElements.length;
+    const targetEl = favElements[nextIdx] as HTMLElement;
+
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      targetEl.classList.remove("fav-pulse-highlight");
+      void targetEl.offsetWidth;
+      targetEl.classList.add("fav-pulse-highlight");
+
+      setFavNavIndex(nextIdx + 1);
+      setNotice(`Chuyển đến khoảnh khắc yêu thích (${nextIdx + 1}/${favElements.length}) ♥`);
+    }
+  };
+
   return (
     <div className="app-shell">
       <div className="romance-backdrop" aria-hidden="true">
@@ -1993,9 +2131,14 @@ export default function Home() {
         <a className="brand-mark" href="#top" aria-label="Lặp Gallery">
           ♥
         </a>
-        <a className="nav-icon active" href="#gallery" aria-label="Bảng ảnh và video">
+        <button
+          className="nav-icon active"
+          type="button"
+          aria-label="Chuyển đến khoảnh khắc yêu thích tiếp theo"
+          onClick={scrollToNextFavorite}
+        >
           ♡
-        </a>
+        </button>
         <button
           className="nav-icon"
           type="button"
@@ -2024,10 +2167,11 @@ export default function Home() {
         <button
           className="nav-icon"
           type="button"
-          aria-label="Cách sử dụng"
-          onClick={() => setNotice("Thêm ảnh hoặc video → tích dấu sao → chọn số ô. Nội dung sẽ tự lặp lại.")}
+          aria-label="Xáo trộn kỷ niệm"
+          disabled={mediaItems.length < 2}
+          onClick={shuffleMedia}
         >
-          ?
+          <Shuffle weight="bold" aria-hidden="true" style={{ width: "20px", height: "20px" }} />
         </button>
       </aside>
 
@@ -2049,20 +2193,6 @@ export default function Home() {
             <span className="brand-mark">♥</span>
             <span>Chuyện mình</span>
           </div>
-          <label className="search-box">
-            <span aria-hidden="true">⌕</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Tìm một kỷ niệm…"
-              aria-label="Tìm theo tên ảnh hoặc video"
-            />
-            {query && (
-              <button type="button" onClick={() => setQuery("")} aria-label="Xóa tìm kiếm">
-                ×
-              </button>
-            )}
-          </label>
           <button
             className="library-button"
             type="button"

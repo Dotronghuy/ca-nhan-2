@@ -2625,11 +2625,29 @@ input:focus-visible,
 .letter-signature {
   margin-top: 20px;
   color: #9e2b4f;
-  font-family: var(--font-romantic), var(--display);
-  font-size: clamp(24px, 4vw, 30px);
-  font-weight: 700;
+  font-family: 'Great Vibes', 'Dancing Script', 'Marck Script', cursive;
+  font-size: clamp(32px, 5.5vw, 44px);
+  font-weight: 400;
   text-align: right;
   padding-right: 8px;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 8px rgba(158, 43, 79, 0.25), 0 0 20px rgba(230, 76, 114, 0.1);
+  animation: signature-appear 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+@keyframes signature-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
 }
 
 .type-caret-heart {
@@ -3107,3 +3125,503 @@ input:focus-visible,
       0 0 45px color-mix(in srgb, var(--accent) 75%, transparent);
   }
 }
+/* ==========================================================================
+   MOBILE & IPHONE 14 PRO MAX RESPONSIVE OPTIMIZATION
+   Only @media queries below — desktop styles are 100% untouched.
+   ========================================================================== */
+
+/* ── Tablet & Small Desktop (≤ 960px) ── */
+@media (max-width: 960px) {
+  .intro-row {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    gap: 32px;
+    padding: 48px clamp(20px, 4vw, 48px) 48px;
+  }
+
+  .empty-showcase {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .empty-visual {
+    min-height: 320px;
+  }
+
+  .masonry-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .source-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Mobile (≤ 640px) ── */
+@media (max-width: 640px) {
+  /* Transform side-nav into a Floating Bottom Tab Bar on mobile */
+  .side-nav {
+    display: flex;
+    position: fixed;
+    z-index: 85;
+    top: auto;
+    bottom: max(12px, env(safe-area-inset-bottom, 12px));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(calc(100vw - 24px), 420px);
+    height: 58px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface) 92%, #2d101a 8%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+
+  .brand-mark,
+  .nav-spacer {
+    display: none;
+  }
+
+  .nav-icon {
+    width: 42px;
+    height: 42px;
+    font-size: 19px;
+    border-radius: 50%;
+  }
+
+  .nav-icon.add-icon {
+    margin-top: 0;
+    width: 46px;
+    height: 46px;
+    font-size: 24px;
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+
+  /* Mobile brand in top bar */
+  .mobile-brand {
+    display: flex;
+    margin-right: auto;
+  }
+
+  /* Remove left margin from main area & add bottom padding for floating bar */
+  .main-area {
+    margin-left: 0;
+    padding-bottom: 76px;
+  }
+
+  /* Top bar layout fix for mobile */
+  .top-bar {
+    padding: max(10px, env(safe-area-inset-top, 10px)) 14px 10px 14px;
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .library-button {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 12px;
+    white-space: nowrap;
+    margin-left: auto;
+  }
+
+  .shuffle-button,
+  .primary-button {
+    display: none; /* Shuffle and Add (+) buttons are conveniently placed in the floating nav bar! */
+  }
+
+  /* Intro hero */
+  .intro-row {
+    padding: 32px 18px 36px;
+    min-height: auto;
+    gap: 20px;
+  }
+
+  .intro-row h1 {
+    font-size: clamp(32px, 8vw, 48px);
+    margin: 14px 0 16px;
+  }
+
+  .intro-copy {
+    font-size: 15px;
+  }
+
+  .love-note {
+    margin-top: 20px;
+    padding-top: 14px;
+  }
+
+  /* Count control sidebar */
+  .count-control {
+    padding: 18px;
+  }
+
+  /* Gallery grid → 3 columns */
+  .masonry-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .gallery-section {
+    padding: 0 8px 40px;
+  }
+
+  .gallery-card {
+    border-radius: 12px;
+  }
+
+  /* Quick star always visible on touch screens */
+  .quick-star {
+    opacity: 1;
+    width: 32px;
+    height: 32px;
+    top: 8px;
+    right: 8px;
+  }
+
+  .favorite-ribbon {
+    right: 8px;
+    bottom: 8px;
+    padding: 6px 12px;
+    font-size: 10px;
+  }
+
+  .video-badge {
+    top: 8px;
+    left: 8px;
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+
+  /* Library panel */
+  .library-panel {
+    margin: 0 8px 32px;
+    padding: 18px;
+  }
+
+  .panel-heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .panel-heading h2 {
+    font-size: 24px;
+  }
+
+  /* Empty showcase */
+  .empty-showcase {
+    padding: 0 14px;
+    margin-bottom: 40px;
+  }
+
+  .empty-copy h2 {
+    font-size: clamp(28px, 7vw, 40px);
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    min-height: 160px;
+    padding: 20px;
+  }
+
+  .drop-zone strong {
+    font-size: 18px;
+  }
+
+  /* Lightbox */
+  .lightbox {
+    padding: 20px 12px 16px;
+  }
+
+  .lightbox-close {
+    top: 10px;
+    right: 10px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .lightbox-info {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .lightbox-info h2 {
+    font-size: 20px;
+  }
+
+  /* Delete confirm dialog */
+  .delete-confirm-dialog {
+    padding: 24px;
+  }
+
+  .delete-confirm-dialog h2 {
+    font-size: 24px;
+  }
+
+  /* Toast popup positioning for Mobile -> Display at TOP of screen */
+  .toast {
+    top: max(68px, calc(env(safe-area-inset-top, 0px) + 64px));
+    bottom: auto;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(calc(100vw - 32px), 400px);
+    text-align: center;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface-strong) 94%, #2d101a);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px color-mix(in srgb, var(--accent) 25%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+
+  /* ── Love Letter Intro (Mobile) ── */
+  .love-letter-backdrop {
+    padding: 16px;
+  }
+
+  .love-letter-scene {
+    max-width: 100%;
+    min-height: auto;
+  }
+
+  .envelope-3d-wrapper {
+    max-width: 100%;
+    height: 260px;
+  }
+
+  .wax-seal-3d {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+  }
+
+  .envelope-prompt-badge {
+    font-size: 13px;
+    padding: 6px 16px;
+    margin-top: 16px;
+  }
+
+  .continuous-letter-paper {
+    padding: 24px 18px 28px;
+    max-height: 84vh;
+    border-radius: 22px;
+  }
+
+  .polaroid-3d-card {
+    float: none;
+    display: block;
+    margin: 0 auto 16px auto;
+    width: 130px;
+    height: 155px;
+  }
+
+  .letter-header {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+  }
+
+  .love-days-badge {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+
+  .letter-salutation {
+    font-size: 22px;
+  }
+
+  .letter-paragraph {
+    font-size: 16px;
+    line-height: 1.65;
+    padding-right: 4px;
+  }
+
+  .voiceover-widget {
+    padding: 12px 14px;
+    margin: 16px 0;
+    border-radius: 14px;
+  }
+
+  .voiceover-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .voiceover-title {
+    font-size: 15px;
+  }
+
+  .voiceover-upload-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
+  .voiceover-play-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .letter-signature {
+    font-size: clamp(28px, 7.5vw, 36px);
+    margin-top: 14px;
+  }
+
+  .letter-next-btn {
+    max-width: 100%;
+    padding: 0 20px;
+    font-size: 15px;
+  }
+
+  /* Closing glide animation adjusted for no sidebar on mobile */
+  .phase-closing-glide .envelope-3d-wrapper {
+    transform: translate(0, -45vh) scale(0.1) rotate(-8deg);
+  }
+
+  /* Love days dialog */
+  .love-days-dialog {
+    max-width: 340px;
+    padding: 22px 18px;
+  }
+
+  .love-days-dialog h3 {
+    font-size: 20px;
+  }
+}
+
+/* ── iPhone 14 Pro Max & Narrow Phones (≤ 440px) ── */
+@media (max-width: 440px) {
+  .love-letter-scene {
+    padding: env(safe-area-inset-top, 12px) 8px 12px 8px;
+  }
+
+  .continuous-letter-paper {
+    padding: 20px 14px 24px;
+    max-height: 82vh;
+  }
+
+  .envelope-3d-wrapper {
+    height: 230px;
+  }
+
+  .wax-seal-3d {
+    width: 50px;
+    height: 50px;
+    font-size: 22px;
+  }
+
+  .polaroid-3d-card {
+    width: 110px;
+    height: 135px;
+  }
+
+  .polaroid-photo-frame {
+    height: 90px;
+  }
+
+  .polaroid-caption {
+    font-size: 12px;
+    margin-top: 6px;
+  }
+
+  .letter-salutation {
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+
+  .letter-paragraph {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .voiceover-play-btn {
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
+  }
+
+  .voiceover-wave-bar {
+    width: 3px;
+    gap: 3px;
+  }
+
+  .letter-next-btn {
+    padding: 0 16px;
+    min-height: 46px;
+    font-size: 14px;
+  }
+
+  /* Gallery grid → 2 columns on very narrow screens */
+  .masonry-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .gallery-card {
+    border-radius: 10px;
+  }
+
+  .intro-row h1 {
+    font-size: clamp(28px, 8vw, 38px);
+  }
+
+  /* Top bar tighter */
+  .top-bar {
+    padding: 8px 10px;
+    min-height: 54px;
+    flex-wrap: wrap;
+  }
+
+  .library-button,
+  .shuffle-button {
+    padding: 0 8px;
+    min-height: 36px;
+    font-size: 12px;
+  }
+}
+
+/* ── Safe area insets for notch/Dynamic Island phones ── */
+@supports (padding-top: env(safe-area-inset-top)) {
+  @media (max-width: 640px) {
+    .top-bar {
+      padding-top: max(10px, env(safe-area-inset-top));
+    }
+
+    .lightbox {
+      padding-top: max(20px, env(safe-area-inset-top));
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+
+    .toast {
+      top: max(68px, calc(env(safe-area-inset-top, 0px) + 64px));
+      bottom: auto;
+    }
+  }
+}
+
+/* ── Favorite card pulse highlight animation when clicking ♡ button ── */
+.fav-pulse-highlight {
+  animation: fav-pulse-glow 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+@keyframes fav-pulse-glow {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 90, 105, 0.8), 0 0 35px rgba(255, 90, 105, 0.8);
+  }
+  30% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 14px rgba(255, 90, 105, 0.4), 0 0 60px rgba(255, 90, 105, 0.9);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 2.5px var(--accent), 0 12px 32px color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+}
+
