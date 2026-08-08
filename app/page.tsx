@@ -1235,12 +1235,13 @@ function VoiceoverWidget({
   const togglePlay = () => {
     if (!audioRef.current || !voiceSrc) return;
     const audio = audioRef.current;
+    audio.volume = 1.0;
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
       if (bgmRef.current) bgmRef.current.volume = 0.45;
     } else {
-      if (bgmRef.current) bgmRef.current.volume = 0.12;
+      if (bgmRef.current) bgmRef.current.volume = 0.04;
       
       if (isFinishedRef.current || audio.ended || audio.currentTime >= audio.duration * 0.95) {
         audio.currentTime = 0;
@@ -1262,9 +1263,10 @@ function VoiceoverWidget({
   useEffect(() => {
     if (!autoPlay || !audioRef.current || !voiceSrc) return;
     const audio = audioRef.current;
+    audio.volume = 1.0;
 
     const tryAutoPlay = () => {
-      if (bgmRef.current) bgmRef.current.volume = 0.12;
+      if (bgmRef.current) bgmRef.current.volume = 0.04;
       isFinishedRef.current = false;
       audio
         .play()
