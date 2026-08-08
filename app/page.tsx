@@ -1145,11 +1145,11 @@ function VoiceoverWidget({
   onProgress,
   autoPlay,
 }: {
-  bgmRef: React.RefObject<HTMLVideoElement | null>;
+  bgmRef: React.RefObject<HTMLAudioElement | null>;
   onProgress?: (progress: number, isPlaying: boolean, isEnded: boolean) => void;
   autoPlay?: boolean;
 }) {
-  const [voiceSrc, setVoiceSrc] = useState<string>("/recording.m4a");
+  const [voiceSrc, setVoiceSrc] = useState<string>("/0808.mp4");
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1183,7 +1183,7 @@ function VoiceoverWidget({
   useEffect(() => {
     const saved = localStorage.getItem("lap-gallery-voiceover");
     if (saved) setVoiceSrc(saved);
-    else setVoiceSrc("/recording.m4a");
+    else setVoiceSrc("/0808.mp4");
 
     getSupabaseSetting("voiceover").then((url) => {
       if (url) setVoiceSrc(url);
@@ -1301,10 +1301,10 @@ function VoiceoverWidget({
   };
 
   const resetToDefaultVoice = async () => {
-    setVoiceSrc("/recording.m4a");
+    setVoiceSrc("/0808.mp4");
     localStorage.removeItem("lap-gallery-voiceover");
     try {
-      await setSupabaseSetting("voiceover", "/recording.m4a");
+      await setSupabaseSetting("voiceover", "/0808.mp4");
     } catch (e) {
       console.error("Failed to reset voiceover:", e);
     }
@@ -1344,9 +1344,9 @@ function VoiceoverWidget({
             type="button"
             onClick={() => fileInputRef.current?.click()}
           >
-            {voiceSrc && voiceSrc !== "/recording.m4a" ? "Đổi ghi âm 🎙️" : "Tải lên ghi âm 🎙️"}
+            {voiceSrc && voiceSrc !== "/0808.mp4" ? "Đổi ghi âm 🎙️" : "Tải lên ghi âm 🎙️"}
           </button>
-          {voiceSrc && voiceSrc !== "/recording.m4a" && (
+          {voiceSrc && voiceSrc !== "/0808.mp4" && (
             <button
               className="voiceover-upload-btn"
               type="button"
@@ -1419,7 +1419,7 @@ function LoveLetterIntro({
   const [typedCharCountP2, setTypedCharCountP2] = useState(0);
   const [hasVoicePlayed, setHasVoicePlayed] = useState(false);
   const [letterPage, setLetterPage] = useState<1 | 2>(1);
-  const bgmRef = useRef<HTMLVideoElement>(null);
+  const bgmRef = useRef<HTMLAudioElement>(null);
   const [bgmReady, setBgmReady] = useState(false);
 
   const totalChars1 = LETTER_POEM_TEXT.length;
@@ -1582,12 +1582,11 @@ function LoveLetterIntro({
       aria-modal="true"
       aria-label="Lá thư tình yêu"
     >
-      {/* Background Audio/Video */}
-      <video
+      {/* Background Audio */}
+      <audio
         ref={bgmRef}
-        src="/0808.mp4"
+        src="/recording.m4a"
         loop
-        playsInline
         style={{ display: "none" }}
       />
 
