@@ -1098,12 +1098,21 @@ function PolaroidCard() {
 
 function calculateLoveDays(startDateStr: string): number {
   try {
-    const start = new Date(startDateStr);
+    const parts = startDateStr.split("-");
+    if (parts.length !== 3) return 197;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+
+    const start = new Date(year, month, day);
     const now = new Date();
-    const diffTime = Math.abs(now.getTime() - start.getTime());
-    return Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const diffTime = today.getTime() - start.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 counts start date as Day 1
+    return Math.max(1, diffDays);
   } catch {
-    return 520;
+    return 198;
   }
 }
 
