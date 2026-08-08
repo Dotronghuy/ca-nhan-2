@@ -1145,7 +1145,7 @@ function VoiceoverWidget({
   onProgress,
   autoPlay,
 }: {
-  bgmRef: React.RefObject<HTMLAudioElement | null>;
+  bgmRef: React.RefObject<HTMLVideoElement | null>;
   onProgress?: (progress: number, isPlaying: boolean, isEnded: boolean) => void;
   autoPlay?: boolean;
 }) {
@@ -1419,7 +1419,7 @@ function LoveLetterIntro({
   const [typedCharCountP2, setTypedCharCountP2] = useState(0);
   const [hasVoicePlayed, setHasVoicePlayed] = useState(false);
   const [letterPage, setLetterPage] = useState<1 | 2>(1);
-  const bgmRef = useRef<HTMLAudioElement>(null);
+  const bgmRef = useRef<HTMLVideoElement>(null);
   const [bgmReady, setBgmReady] = useState(false);
 
   const totalChars1 = LETTER_POEM_TEXT.length;
@@ -1582,11 +1582,12 @@ function LoveLetterIntro({
       aria-modal="true"
       aria-label="Lá thư tình yêu"
     >
-      {/* Background Audio */}
-      <audio
+      {/* Background Music */}
+      <video
         ref={bgmRef}
-        src="/recording.m4a"
+        src="/Download.mp4"
         loop
+        playsInline
         style={{ display: "none" }}
       />
 
