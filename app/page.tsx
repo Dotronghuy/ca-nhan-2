@@ -1300,6 +1300,16 @@ function VoiceoverWidget({
     }
   };
 
+  const resetToDefaultVoice = async () => {
+    setVoiceSrc("/recording.m4a");
+    localStorage.removeItem("lap-gallery-voiceover");
+    try {
+      await setSupabaseSetting("voiceover", "/recording.m4a");
+    } catch (e) {
+      console.error("Failed to reset voiceover:", e);
+    }
+  };
+
   return (
     <div className={`voiceover-widget${isPlaying ? " is-playing" : ""}`}>
       <input
@@ -1328,13 +1338,26 @@ function VoiceoverWidget({
           <span>🎙️</span>
           <span>{voiceSrc ? "Lời đọc của anh" : "Giọng đọc truyền cảm"}</span>
         </span>
-        <button
-          className="voiceover-upload-btn"
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {voiceSrc ? "Đổi ghi âm 🎙️" : "Tải lên ghi âm giọng đọc 🎙️"}
-        </button>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <button
+            className="voiceover-upload-btn"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {voiceSrc && voiceSrc !== "/recording.m4a" ? "Đổi ghi âm 🎙️" : "Tải lên ghi âm 🎙️"}
+          </button>
+          {voiceSrc && voiceSrc !== "/recording.m4a" && (
+            <button
+              className="voiceover-upload-btn"
+              type="button"
+              onClick={resetToDefaultVoice}
+              title="Khôi phục lại đoạn ghi âm giọng đọc mặc định ban đầu"
+              style={{ background: "rgba(255, 255, 255, 0.7)", color: "#8c2545" }}
+            >
+              Đặt lại gốc 🔄
+            </button>
+          )}
+        </div>
       </div>
 
       {voiceSrc ? (
